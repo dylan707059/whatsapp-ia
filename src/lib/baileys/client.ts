@@ -31,7 +31,7 @@ let starting = false;
 function scheduleReconnect(code?: number) {
   if (reconnectTimer) return;
 
-  const delay = code === 440 ? 15000 : 5000;
+  const delay = code === 440 ? 15000 : code === undefined ? 10000 : 5000;
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -76,6 +76,8 @@ async function _start(): Promise<void> {
     browser: Browsers.macOS("Desktop"),
     markOnlineOnConnect: true,
     syncFullHistory: false,
+    connectTimeoutMs: 60_000,      // 60s para escanear antes de regenerar QR
+    retryRequestDelayMs: 5_000,    // 5s entre reintentos internos
     // Requerido en v6.7+ para que el procesamiento de mensajes no se bloquee
     getMessage: async (key) => {
       const id = key.id ?? "";

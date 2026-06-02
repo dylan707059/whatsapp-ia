@@ -1,0 +1,33 @@
+# Dependencias
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Variables de entorno (contienen claves secretas — NUNCA subir)
+.env
+.env.local
+.env*.local
+
+# Sesión Baileys (contiene credenciales WhatsApp — NUNCA subir)
+auth/
+
+# Base de datos local (contiene mensajes y pedidos — NUNCA subir)
+data/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Logs
+*.log
+pino-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -49,10 +49,22 @@ setInterval(async () => {
   await start();
 }, 1000);
 
+// ─── Capturar errores internos de Baileys (e.g. "Connection Closed" en retry) ─
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[bot] Error no manejado, reconectando en 5s...", reason);
+  setTimeout(() => start().catch(console.error), 5000);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[bot] Excepción no capturada, reconectando en 5s...", err);
+  setTimeout(() => start().catch(console.error), 5000);
+});
+
 // ─── Arranque principal ───────────────────────────────────────────────────────
 
 console.log("[bot] Iniciando agente WhatsApp...");
 start().catch((err) => {
   console.error("[bot] Error fatal al iniciar:", err);
-  process.exit(1);
+  setTimeout(() => start().catch(console.error), 5000);
 });

@@ -26,6 +26,7 @@ interface BaileysHandle {
 
 let handle: BaileysHandle | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let starting = false;
 
 function scheduleReconnect(code?: number) {
   if (reconnectTimer) return;
@@ -47,6 +48,16 @@ function scheduleReconnect(code?: number) {
 }
 
 export async function start(): Promise<void> {
+  if (starting) return;
+  starting = true;
+  try {
+    await _start();
+  } finally {
+    starting = false;
+  }
+}
+
+async function _start(): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
   let version: [number, number, number] | undefined;

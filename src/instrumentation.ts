@@ -2,6 +2,8 @@ export async function register() {
   // Solo en runtime Node.js (no edge, no durante next build)
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
+  // En Render, start:all ya lanza el bot — no spawnear un segundo proceso
+  if (process.env.RENDER) return;
 
   const { spawn } = await import("node:child_process");
   const path      = await import("node:path");

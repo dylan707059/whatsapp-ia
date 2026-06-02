@@ -108,7 +108,7 @@ export async function start(): Promise<void> {
       if (msg.key?.id) {
         msgCache.set(msg.key.id, msg);
         // Limitar el tamaño del caché
-        if (msgCache.size > 500) {
+        if (msgCache.size > 100) {
           const first = msgCache.keys().next().value;
           if (first) msgCache.delete(first);
         }

@@ -2,6 +2,7 @@ providers = ["node"]
 
 [variables]
 NIXPACKS_NODE_VERSION = "22"
+NODE_OPTIONS = "--max-old-space-size=400"
 
 [phases.setup]
 nixPkgs = ["nodejs_22", "npm-10_x", "python3", "gcc", "gnumake"]

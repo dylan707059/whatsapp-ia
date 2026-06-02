@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { setConnectionState } from "@/lib/db";
 import { AUTH_DIR, RESTART_FLAG } from "@/lib/paths";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getConversationById } from "@/lib/db";
 import { getActiveOrder } from "@/lib/orders";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface Ctx {

@@ -6,6 +6,7 @@ import {
   enqueueOutbox
 } from "@/lib/db";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface Ctx {

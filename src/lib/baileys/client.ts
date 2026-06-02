@@ -168,12 +168,15 @@ export async function start(): Promise<void> {
         statusCode === DisconnectReason.loggedOut ||
         statusCode === 401
       ) {
-        console.log("[bot] Sesión cerrada. No se reconectará.");
-        setConnectionState({
-          status: "disconnected",
-          qr_string: null,
-          phone: null
-        });
+        console.log("[bot] Sesión expirada (401). Limpiando credenciales y regenerando QR...");
+        setConnectionState({ status: "disconnected", qr_string: null, phone: null });
+
+        // Borrar auth y reconectar para mostrar QR nuevo
+        const { rmSync } = await import("node:fs");
+        const { AUTH_DIR: dir } = await import("../paths");
+        try { rmSync(dir, { recursive: true, force: true }); } catch {}
+
+        scheduleReconnect();
         return;
       }
 

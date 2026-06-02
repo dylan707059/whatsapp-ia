@@ -104,17 +104,13 @@ export default function QRScreen({ onConnected }: Props) {
         </div>
       </div>
 
-      {/* Mensaje de error si lleva más de 10s en disconnected sin QR */}
-      {status === "disconnected" && !qrPng && stuckSeconds > 10 && (
+      {/* Mensaje de error si lleva más de 30s en disconnected sin QR */}
+      {status === "disconnected" && !qrPng && stuckSeconds > 30 && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-xs text-center">
           <p className="text-sm text-red-600">
-            No se detecta el proceso del bot.
+            El bot tardó más de lo esperado en iniciar.
             <br />
-            Asegurate de ejecutar{" "}
-            <code className="font-mono bg-red-100 px-1 rounded">
-              npm run start:bot
-            </code>{" "}
-            en otra terminal.
+            Recarga la página o revisa la consola del servidor.
           </p>
         </div>
       )}

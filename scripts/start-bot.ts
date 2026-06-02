@@ -1,9 +1,16 @@
 import "./env-loader";
 
 import fs from "node:fs";
+import path from "node:path";
 import { start, getHandle } from "../src/lib/baileys/client";
 import { getPendingOutbox, markOutboxSent, getConnectionState } from "../src/lib/db";
-import { AUTH_DIR, RESTART_FLAG } from "../src/lib/paths";
+import { AUTH_DIR, DATA_DIR, RESTART_FLAG } from "../src/lib/paths";
+
+// Escribir PID para que Next.js (instrumentation.ts) detecte que ya estamos corriendo
+fs.writeFileSync(path.join(DATA_DIR, "bot.pid"), String(process.pid));
+process.on("exit", () => {
+  try { fs.unlinkSync(path.join(DATA_DIR, "bot.pid")); } catch {}
+});
 
 // ─── Outbox poller ────────────────────────────────────────────────────────────
 

@@ -10,6 +10,10 @@ export async function register() {
   const cwd     = process.cwd();
   const pidFile = path.join(cwd, "data", "bot.pid");
 
+  // Esperar un poco para que start:all pueda escribir el PID antes de que
+  // Next.js intente spawnear otro bot (evita duplicado en producción)
+  await new Promise((r) => setTimeout(r, 2500));
+
   // Si el bot ya está corriendo (escribió su propio PID), no spawnear otro
   try {
     if (fs.existsSync(pidFile)) {

@@ -39,7 +39,8 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS conversations (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone            TEXT UNIQUE NOT NULL,
+    phone            TEXT NOT NULL,
+    owner_phone      TEXT NOT NULL DEFAULT '',
     name             TEXT,
     mode             TEXT CHECK(mode IN ('AI','HUMAN')) NOT NULL DEFAULT 'AI',
     last_message_at  INTEGER,
@@ -47,7 +48,8 @@ db.exec(`
     confirmed_at     INTEGER,
     owner_notified_at INTEGER,
     ai_paused_until  INTEGER,
-    blocked_at       INTEGER
+    blocked_at       INTEGER,
+    UNIQUE(phone, owner_phone)
   );
 
   CREATE TABLE IF NOT EXISTS messages (
@@ -173,6 +175,7 @@ db.exec(`
   if (!cols.includes("owner_notified_at")) db.exec("ALTER TABLE conversations ADD COLUMN owner_notified_at INTEGER");
   if (!cols.includes("ai_paused_until"))   db.exec("ALTER TABLE conversations ADD COLUMN ai_paused_until INTEGER");
   if (!cols.includes("blocked_at"))        db.exec("ALTER TABLE conversations ADD COLUMN blocked_at INTEGER");
+  if (!cols.includes("owner_phone"))       db.exec("ALTER TABLE conversations ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(orders)").all() as { name: string }[])
@@ -193,14 +196,14 @@ export { db };
 // ─── 4. Prepared statements (tablas ya garantizadas) ─────────────────────────
 
 // Conversaciones
-const stmtGetConvByPhone = db.prepare<[string], Conversation>(
-  "SELECT * FROM conversations WHERE phone = ?"
+const stmtGetConvByPhone = db.prepare<[string, string], Conversation>(
+  "SELECT * FROM conversations WHERE phone = ? AND owner_phone = ?"
 );
-const stmtInsertConv = db.prepare<[string, string | null], Conversation>(
-  "INSERT INTO conversations (phone, name) VALUES (?, ?) RETURNING *"
+const stmtInsertConv = db.prepare<[string, string | null, string], Conversation>(
+  "INSERT INTO conversations (phone, name, owner_phone) VALUES (?, ?, ?) RETURNING *"
 );
-const stmtUpdateConvName = db.prepare<[string | null, string]>(
-  "UPDATE conversations SET name = ? WHERE phone = ?"
+const stmtUpdateConvName = db.prepare<[string | null, string, string]>(
+  "UPDATE conversations SET name = ? WHERE phone = ? AND owner_phone = ?"
 );
 const stmtGetConvById = db.prepare<[number], Conversation>(
   "SELECT * FROM conversations WHERE id = ?"
@@ -208,32 +211,33 @@ const stmtGetConvById = db.prepare<[number], Conversation>(
 const stmtSetMode = db.prepare<[string, number]>(
   "UPDATE conversations SET mode = ? WHERE id = ?"
 );
-const stmtListConversations = db.prepare<[], ConversationWithPreview>(`
+const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
   SELECT
     c.*,
     (SELECT content FROM messages
      WHERE conversation_id = c.id
      ORDER BY created_at DESC LIMIT 1) AS last_message_preview
   FROM conversations c
+  WHERE c.owner_phone = ?
   ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
 `);
 
-export function getOrCreateConversation(phone: string, name?: string | null): Conversation {
-  const existing = stmtGetConvByPhone.get(phone);
+export function getOrCreateConversation(phone: string, name?: string | null, ownerPhone = ""): Conversation {
+  const existing = stmtGetConvByPhone.get(phone, ownerPhone);
   if (existing) {
     if (name && name !== existing.name) {
-      stmtUpdateConvName.run(name, phone);
+      stmtUpdateConvName.run(name, phone, ownerPhone);
       existing.name = name;
     }
     return existing;
   }
-  return stmtInsertConv.all(phone, name ?? null)[0];
+  return stmtInsertConv.all(phone, name ?? null, ownerPhone)[0];
 }
 export function getConversationById(id: number): Conversation | undefined {
   return stmtGetConvById.get(id);
 }
-export function listConversations(): ConversationWithPreview[] {
-  return stmtListConversations.all();
+export function listConversations(ownerPhone = ""): ConversationWithPreview[] {
+  return stmtListConversations.all(ownerPhone);
 }
 export function setMode(conversationId: number, mode: ConversationMode): void {
   stmtSetMode.run(mode, conversationId);
@@ -335,12 +339,14 @@ export function setOwnerNotifiedAt(conversationId: number): void { stmtSetOwnerN
 
 // Pausa de IA
 const stmtSetAiPause  = db.prepare<[number, number]>("UPDATE conversations SET ai_paused_until = ? WHERE id = ?");
-const stmtGetConvByJid= db.prepare<[string], Conversation>("SELECT * FROM conversations WHERE phone = ?");
+const stmtGetConvByJid = db.prepare<[string, string], Conversation>(
+  "SELECT * FROM conversations WHERE phone = ? AND owner_phone = ?"
+);
 export function setAiPausedUntil(conversationId: number, until: number): void {
   stmtSetAiPause.run(until, conversationId);
 }
-export function getConversationByPhone(phone: string): Conversation | undefined {
-  return stmtGetConvByJid.get(phone);
+export function getConversationByPhone(phone: string, ownerPhone = ""): Conversation | undefined {
+  return stmtGetConvByJid.get(phone, ownerPhone);
 }
 export function setConversationMode(conversationId: number, mode: ConversationMode): void {
   stmtSetMode.run(mode, conversationId);

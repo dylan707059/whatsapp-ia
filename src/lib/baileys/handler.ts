@@ -60,12 +60,15 @@ async function processMessage(
   const jid: string = msg.key?.remoteJid ?? "";
   if (!isIndividualJid(jid)) return;
 
+  const rawOwnerId  = sock.user?.id ?? "";
+  const ownerPhone  = rawOwnerId.split(":")[0];
+
   // ─── Mensajes fromMe ─────────────────────────────────────────────────────
   if (msg.key?.fromMe) {
     const msgId: string = msg.key?.id ?? "";
     if (isBotSentMessage(msgId)) return;
 
-    const conv = getConversationByPhone(jid);
+    const conv = getConversationByPhone(jid, ownerPhone);
     if (conv) {
       const pauseUntil = Math.floor(Date.now() / 1000) + AI_PAUSE_MINUTES * 60;
       setAiPausedUntil(conv.id, pauseUntil);
@@ -116,7 +119,7 @@ async function processMessage(
   }
 
   // ─── Guardar mensaje del cliente ──────────────────────────────────────────
-  const convo = getOrCreateConversation(jid, pushName ?? null);
+  const convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
   insertMessage(convo.id, "user", text);
 
   // ─── Reclamo ──────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ export interface Conversation {
   owner_notified_at: number | null;
   ai_paused_until: number | null;
   blocked_at: number | null;
+  owner_phone: string;
 }
 
 export interface ConversationWithPreview extends Conversation {

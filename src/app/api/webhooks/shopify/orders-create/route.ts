@@ -4,7 +4,8 @@ import {
   getOrCreateConversation,
   enqueueOutbox,
   insertMessage,
-  setConversationMode
+  setConversationMode,
+  getActiveAccountSettings
 } from "@/lib/db";
 import { upsertOrder, computeOrderHash, findOrderByHash } from "@/lib/orders";
 import { normalizePhone, phoneToJid } from "@/lib/phone-utils";
@@ -30,7 +31,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ─── 1. Leer body crudo (necesario para validar HMAC) ──────────────────────
   const rawBody = Buffer.from(await req.arrayBuffer());
   const hmac = req.headers.get("x-shopify-hmac-sha256");
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+  // Prefiere el secret configurado en la cuenta; cae a la variable de entorno.
+  const settings = getActiveAccountSettings();
+  const secret = settings?.shopify_webhook_secret?.trim() || process.env.SHOPIFY_WEBHOOK_SECRET;
 
   // ─── 2. Validar firma HMAC ────────────────────────────────────────────────
   if (!verifyShopifyHmac(rawBody, hmac, secret)) {
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     // Respetar mismo delay anti-bloqueo que las confirmaciones normales
-    const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+    const delaySec = settings?.confirmation_delay_seconds ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
     const rejMsgId = insertMessage(conv.id, "assistant", rejectionText);
@@ -144,7 +147,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     });
 
-    const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+    const delaySec = settings?.confirmation_delay_seconds ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
     const ofcMsgId = insertMessage(conv.id, "assistant", rejectionText);
@@ -215,7 +218,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // SHOPIFY_CONFIRMATION_DELAY_SECONDS (default 180s = 3 min), enviamos igual.
   // El handler de mensajes entrantes adelanta este envío si el cliente escribe
   // antes (vía advancePendingOutbox).
-  const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+  const delaySec = settings?.confirmation_delay_seconds ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
   const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
   const message = buildConfirmationMessage(parsed);

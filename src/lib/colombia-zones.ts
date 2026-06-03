@@ -1,3 +1,5 @@
+import { getActiveAccountSettings } from "./db";
+
 // ─── Zonas no cubiertas por transportadoras estándar en Colombia ─────────────
 // Departamentos donde NO realizamos envíos por restricciones logísticas:
 //   - Islas, selva, zonas sin carretera nacional
@@ -73,27 +75,30 @@ export function normalizeZoneName(raw: string): string {
 }
 
 function getConfiguredBlockedDepartments(): string[] {
-  const envValue = (process.env.SHOPIFY_BLOCKED_DEPARTMENTS || "").trim();
-  if (!envValue) return DEFAULT_BLOCKED_DEPARTMENTS;
-  return envValue
+  const fromDb = getActiveAccountSettings()?.blocked_departments?.trim();
+  const raw = fromDb || (process.env.SHOPIFY_BLOCKED_DEPARTMENTS || "").trim();
+  if (!raw) return DEFAULT_BLOCKED_DEPARTMENTS;
+  return raw
     .split(",")
     .map(s => normalizeZoneName(s))
     .filter(Boolean);
 }
 
 function getConfiguredBlockedCities(): string[] {
-  const envValue = (process.env.SHOPIFY_BLOCKED_CITIES || "").trim();
-  if (!envValue) return DEFAULT_BLOCKED_CITIES;
-  return envValue
+  const fromDb = getActiveAccountSettings()?.blocked_cities?.trim();
+  const raw = fromDb || (process.env.SHOPIFY_BLOCKED_CITIES || "").trim();
+  if (!raw) return DEFAULT_BLOCKED_CITIES;
+  return raw
     .split(",")
     .map(s => normalizeZoneName(s))
     .filter(Boolean);
 }
 
 function getConfiguredBlockedDepartmentCodes(): string[] {
-  const envValue = (process.env.SHOPIFY_BLOCKED_DEPARTMENT_CODES || "").trim();
-  if (!envValue) return DEFAULT_BLOCKED_DEPARTMENT_CODES;
-  return envValue
+  const fromDb = getActiveAccountSettings()?.blocked_department_codes?.trim();
+  const raw = fromDb || (process.env.SHOPIFY_BLOCKED_DEPARTMENT_CODES || "").trim();
+  if (!raw) return DEFAULT_BLOCKED_DEPARTMENT_CODES;
+  return raw
     .split(",")
     .map(s => normalizeZoneName(s))
     .filter(Boolean);

@@ -238,6 +238,22 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+
+  -- Configuración por cuenta (reemplaza las variables de entorno globales).
+  -- Si un campo queda vacío, el sistema usa el valor de la variable de entorno
+  -- como respaldo (ver getActiveAccountSettings y sus consumidores).
+  CREATE TABLE IF NOT EXISTS account_settings (
+    account_id                 INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    shopify_domain             TEXT,
+    shopify_webhook_secret     TEXT,
+    confirmation_delay_seconds INTEGER,
+    blocked_departments        TEXT,
+    blocked_cities             TEXT,
+    blocked_department_codes   TEXT,
+    owner_notify_phones        TEXT,
+    configured                 INTEGER NOT NULL DEFAULT 0,
+    updated_at                 INTEGER NOT NULL DEFAULT (unixepoch())
+  );
 `);
 
 // ─── 2. Migraciones — solo para bases de datos antiguas ───────────────────────
@@ -837,6 +853,85 @@ export function getAccountBySessionToken(token: string): Account | undefined {
 
 export function deleteSession(token: string): void {
   if (token) stmtDeleteSession.run(token);
+}
+
+// ─── Configuración por cuenta ─────────────────────────────────────────────────
+export interface AccountSettings {
+  account_id: number;
+  shopify_domain: string | null;
+  shopify_webhook_secret: string | null;
+  confirmation_delay_seconds: number | null;
+  blocked_departments: string | null;
+  blocked_cities: string | null;
+  blocked_department_codes: string | null;
+  owner_notify_phones: string | null;
+  configured: number;
+  updated_at: number;
+}
+
+const stmtGetSettings = db.prepare<[number], AccountSettings>(
+  "SELECT * FROM account_settings WHERE account_id = ?"
+);
+const stmtActiveSettings = db.prepare<[], AccountSettings>(
+  "SELECT * FROM account_settings WHERE configured = 1 ORDER BY account_id ASC LIMIT 1"
+);
+const stmtUpsertSettings = db.prepare(`
+  INSERT INTO account_settings (
+    account_id, shopify_domain, shopify_webhook_secret, confirmation_delay_seconds,
+    blocked_departments, blocked_cities, blocked_department_codes, owner_notify_phones,
+    configured, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch())
+  ON CONFLICT(account_id) DO UPDATE SET
+    shopify_domain             = excluded.shopify_domain,
+    shopify_webhook_secret     = excluded.shopify_webhook_secret,
+    confirmation_delay_seconds = excluded.confirmation_delay_seconds,
+    blocked_departments        = excluded.blocked_departments,
+    blocked_cities             = excluded.blocked_cities,
+    blocked_department_codes   = excluded.blocked_department_codes,
+    owner_notify_phones        = excluded.owner_notify_phones,
+    configured                 = 1,
+    updated_at                 = unixepoch()
+`);
+
+export function getAccountSettings(accountId: number): AccountSettings | undefined {
+  return stmtGetSettings.get(accountId);
+}
+
+export interface AccountSettingsInput {
+  shopifyDomain: string | null;
+  shopifyWebhookSecret: string | null;
+  confirmationDelaySeconds: number | null;
+  blockedDepartments: string | null;
+  blockedCities: string | null;
+  blockedDepartmentCodes: string | null;
+  ownerNotifyPhones: string | null;
+}
+
+export function upsertAccountSettings(accountId: number, data: AccountSettingsInput): void {
+  stmtUpsertSettings.run(
+    accountId,
+    data.shopifyDomain,
+    data.shopifyWebhookSecret,
+    data.confirmationDelaySeconds,
+    data.blockedDepartments,
+    data.blockedCities,
+    data.blockedDepartmentCodes,
+    data.ownerNotifyPhones
+  );
+}
+
+/**
+ * Devuelve la configuración de la cuenta activa (single-tenant por ahora: la
+ * primera cuenta configurada). La usan los consumidores (webhook, zonas,
+ * notificaciones) prefiriendo estos valores sobre las variables de entorno.
+ * Defensivo: si algo falla, devuelve undefined y los consumidores caen al env.
+ */
+export function getActiveAccountSettings(): AccountSettings | undefined {
+  try {
+    return stmtActiveSettings.get();
+  } catch {
+    return undefined;
+  }
 }
 
 // ─── Auto-seed de la cuenta inicial desde variables de entorno ────────────────

@@ -1,6 +1,6 @@
 import type { WASocket } from "@whiskeysockets/baileys";
 import type { OrderData } from "./types";
-import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage } from "./db";
+import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getActiveAccountSettings } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
 import { enqueueOrderTask } from "./queue";
@@ -13,7 +13,8 @@ export function sleep(ms: number): Promise<void> {
 }
 
 export function getOwnerNotifyPhones(): string[] {
-  const raw = process.env.OWNER_NOTIFY_PHONES ?? "";
+  const fromDb = getActiveAccountSettings()?.owner_notify_phones?.trim();
+  const raw = fromDb || (process.env.OWNER_NOTIFY_PHONES ?? "");
   if (!raw.trim()) return [];
   return raw
     .split(",")

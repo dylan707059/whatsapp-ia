@@ -78,12 +78,25 @@ setInterval(ensureAccountsConnected, 5000);
 
 // ─── Outbox poller (por cuenta) ───────────────────────────────────────────────
 
+// Edad máxima de un mensaje en cola: si quedó sin enviar más de esto (típicamente
+// porque el bot estuvo desconectado mucho tiempo), se DESCARTA en vez de enviarse.
+// Evita spamear a clientes viejos con confirmaciones/recordatorios al reconectar.
+const MAX_OUTBOX_AGE_SEC = Number(process.env.MAX_OUTBOX_AGE_SEC ?? 6 * 3600); // 6h
+
 setInterval(async () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+
   for (const h of listHandles()) {
     const conn = getAccountConnection(h.accountId);
     if (conn.status !== "connected" || !conn.phone) continue;
 
     for (const item of getPendingOutbox(conn.phone, 20)) {
+      // Descartar mensajes demasiado viejos (no enviar tras larga desconexión).
+      if (nowSec - item.created_at > MAX_OUTBOX_AGE_SEC) {
+        claimOutboxItem(item.id); // marcar como procesado sin enviar
+        console.log(`[bot] Outbox #${item.id} descartado por antiguo (${Math.round((nowSec - item.created_at) / 3600)}h)`);
+        continue;
+      }
       if (!claimOutboxItem(item.id)) continue;
       try {
         const result = await h.sock.sendMessage(item.phone, { text: item.content });
@@ -120,6 +133,9 @@ setInterval(async () => {
 const REMINDER_MAX      = Number(process.env.SHOPIFY_REMINDER_MAX ?? 2);
 const REMINDER_INTERVAL = Number(process.env.SHOPIFY_REMINDER_INTERVAL_SEC ?? 7200); // 2h
 const REMINDER_CHECK_MS = Number(process.env.SHOPIFY_REMINDER_CHECK_MS ?? 5 * 60 * 1000); // 5 min
+// No recordar/cancelar pedidos más viejos que esto (evita spam al reconectar
+// tras mucho tiempo). Default 24h.
+const REMINDER_MAX_AGE  = Number(process.env.SHOPIFY_REMINDER_MAX_AGE_SEC ?? 24 * 3600);
 
 function buildReminderText(attemptNumber: number, customerFirstName: string | null, orderNumber: string): string {
   const greeting = customerFirstName ? `Hola ${customerFirstName} 😊` : "Hola 😊";
@@ -143,6 +159,8 @@ function buildAutoCancelText(customerFirstName: string | null, orderNumber: stri
 }
 
 setInterval(() => {
+  const nowSec = Math.floor(Date.now() / 1000);
+
   // Para cada cuenta conectada, procesar SUS recordatorios (filtrados por su número).
   for (const h of listHandles()) {
     const conn = getAccountConnection(h.accountId);
@@ -152,6 +170,7 @@ setInterval(() => {
     const currentOwner = conn.phone;
 
     for (const order of getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
+      if (nowSec - order.created_at > REMINDER_MAX_AGE) continue; // pedido viejo, no recordar
       try {
         const attemptNumber = order.reminder_count + 1;
         const orderNumberText = order.id ? `#${order.id}` : "";
@@ -172,6 +191,7 @@ setInterval(() => {
     }
 
     for (const order of getOrdersToAutoCancel(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
+      if (nowSec - order.created_at > REMINDER_MAX_AGE) continue; // pedido viejo, no avisar
       try {
         const orderNumberText = order.id ? `#${order.id}` : "";
         const text = buildAutoCancelText(order.first_name, orderNumberText);

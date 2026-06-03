@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 interface Props {
   role: "user" | "assistant" | "human";
   content: string;
@@ -11,7 +13,7 @@ function formatTime(unixSeconds: number): string {
   });
 }
 
-export default function MessageBubble({ role, content, createdAt }: Props) {
+function MessageBubbleInner({ role, content, createdAt }: Props) {
   const isIncoming = role === "user";
 
   return (
@@ -77,3 +79,8 @@ export default function MessageBubble({ role, content, createdAt }: Props) {
     </div>
   );
 }
+
+// Memoizado: una burbuja nunca cambia su contenido una vez creada, así que
+// solo re-renderiza si role/content/createdAt cambian (raro).
+const MessageBubble = memo(MessageBubbleInner);
+export default MessageBubble;

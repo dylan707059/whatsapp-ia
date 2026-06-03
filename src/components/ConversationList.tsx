@@ -1,7 +1,9 @@
 "use client";
 
+import { memo } from "react";
 import type { ConversationWithPreview } from "@/lib/types";
 import { jidToDisplay } from "@/lib/types";
+import { ChatRowSkeleton } from "./Skeleton";
 
 interface Props {
   conversations: ConversationWithPreview[];
@@ -11,6 +13,7 @@ interface Props {
   onSearch: (q: string) => void;
   viewLabel: string;
   totalCount: number;
+  loading?: boolean;
 }
 
 function relativeTime(unixSeconds: number | null): string {
@@ -134,7 +137,14 @@ export default function ConversationList(props: Props) {
 
       {/* Lista */}
       <div style={{ flex: 1, overflowY: "auto", paddingTop: 6 }}>
-        {props.conversations.length === 0 && (
+        {props.loading && props.conversations.length === 0 && (
+          <div style={{ paddingTop: 6 }}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <ChatRowSkeleton key={i} />
+            ))}
+          </div>
+        )}
+        {!props.loading && props.conversations.length === 0 && (
           <div
             style={{
               padding: "32px 20px",
@@ -196,13 +206,37 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ChatRow({
-  conv, active, onClick
-}: {
+interface ChatRowProps {
   conv: ConversationWithPreview;
   active: boolean;
   onClick: () => void;
-}) {
+}
+
+const ChatRow = memo(ChatRowInner, (prev, next) => {
+  // Re-render solo si cambia el contenido visible: selección, last_message_at,
+  // preview, mode, pinned, name, labels.
+  if (prev.active !== next.active) return false;
+  if (prev.conv.id !== next.conv.id) return false;
+  if (prev.conv.last_message_at !== next.conv.last_message_at) return false;
+  if (prev.conv.last_message_preview !== next.conv.last_message_preview) return false;
+  if (prev.conv.mode !== next.conv.mode) return false;
+  if (prev.conv.pinned_at !== next.conv.pinned_at) return false;
+  if (prev.conv.name !== next.conv.name) return false;
+  // Comparación de labels por id y nombre (las labels son inmutables salvo update raro)
+  const prevLabels = prev.conv.labels ?? [];
+  const nextLabels = next.conv.labels ?? [];
+  if (prevLabels.length !== nextLabels.length) return false;
+  for (let i = 0; i < prevLabels.length; i++) {
+    if (prevLabels[i].id !== nextLabels[i].id) return false;
+    if (prevLabels[i].name !== nextLabels[i].name) return false;
+    if (prevLabels[i].color !== nextLabels[i].color) return false;
+  }
+  return true;
+});
+
+function ChatRowInner({
+  conv, active, onClick
+}: ChatRowProps) {
   const name = displayName(conv);
   const [g1, g2] = avatarColors(name);
   const initials = initialsOf(name);

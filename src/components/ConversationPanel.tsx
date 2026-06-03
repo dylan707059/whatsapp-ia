@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Conversation, Message } from "@/lib/types";
 import { jidToDisplay } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import OrderSummary from "./OrderSummary";
 import LabelsPopover from "./LabelsPopover";
+import { useEventStream } from "./useEventStream";
 
 interface Props {
   conversation: Conversation;
@@ -51,11 +52,10 @@ export default function ConversationPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id]);
 
-  useEffect(() => {
-    const t = setInterval(fetchMessages, 2000);
-    return () => clearInterval(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversation.id]);
+  // SSE: cualquier mensaje nuevo dispara refetch de este chat.
+  // (Optimización futura: filtrar por conversationId en el evento.)
+  const onMsgEvent = useCallback(() => { fetchMessages(); }, [conversation.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEventStream("/api/events", { msg: onMsgEvent });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -86,15 +86,39 @@ export default function ConversationPanel({
     if (!text || sending) return;
     setSending(true);
     setInput("");
+
+    // OPTIMISTIC: agregamos el mensaje al estado local YA, con id temporal
+    // negativo. Cuando el server confirma, el fetchMessages lo reemplaza
+    // por el real. Si falla, queda marcado como "fallido" (id < 0).
+    const tempId = -Date.now();
+    const optimistic: Message = {
+      id: tempId,
+      conversation_id: conversation.id,
+      role: "human",
+      content: text,
+      created_at: Math.floor(Date.now() / 1000)
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
     try {
-      await fetch(`/api/messages/${conversation.id}`, {
+      const res = await fetch(`/api/messages/${conversation.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text })
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Refetch para reemplazar el optimistic por el mensaje real con id correcto
       await fetchMessages();
     } catch (err) {
-      console.error(err);
+      console.error("[ui] Error enviando mensaje:", err);
+      // Marcar el optimistic como fallido: mantener pero cambiar el contenido
+      // para indicar el problema; el user puede reintentar copiando+pegando.
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId
+          ? { ...m, content: `❌ FALLÓ ENVIAR: ${text}` }
+          : m
+        ))
+      );
     } finally {
       setSending(false);
     }

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
 import Sidebar, { type View } from "./Sidebar";
 import ConversationList from "./ConversationList";
 import ConversationPanel from "./ConversationPanel";
+import { useEventStream } from "./useEventStream";
 
 type AppStatus = "loading" | "qr" | "connected";
 
@@ -13,30 +14,38 @@ export default function ConnectionGate() {
   const [appStatus, setAppStatus]         = useState<AppStatus>("loading");
   const [connectedPhone, setConnected]    = useState<string>("");
   const [conversations, setConversations] = useState<ConversationWithPreview[]>([]);
+  const [convsLoaded, setConvsLoaded]     = useState<boolean>(false);
   const [archivedCount, setArchivedCount] = useState<number>(0);
   const [view, setView]                   = useState<View>("active");
   const [selectedId, setSelectedId]       = useState<number | null>(null);
   const [search, setSearch]               = useState<string>("");
   const [labelFilter, setLabelFilter]     = useState<number | null>(null);
 
-  // Polling estado de conexión
+  // Estado de conexión: polling mientras NO conectados (necesitamos el QR);
+  // cuando conectados, dependemos del evento SSE "conn" que llega abajo.
   useEffect(() => {
     checkStatus();
-    const timer = setInterval(() => {
-      if (appStatus !== "connected") checkStatus();
-    }, 2000);
+    if (appStatus === "connected") return;
+    const timer = setInterval(checkStatus, 2000);
     return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appStatus]);
 
-  // Polling conversaciones
+  // Fetch inicial de conversaciones al conectar y al cambiar view
   useEffect(() => {
     if (appStatus !== "connected") return;
     fetchConversations();
-    const timer = setInterval(fetchConversations, 2500);
-    return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appStatus, view]);
+
+  // SSE: push instantáneo de cambios desde el backend
+  const onConvEvent = useCallback(() => { fetchConversations(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onConnEvent = useCallback(() => { checkStatus(); }, []);
+  useEventStream(
+    "/api/events",
+    { conv: onConvEvent, conn: onConnEvent },
+    appStatus === "connected"
+  );
 
   async function checkStatus() {
     try {
@@ -67,6 +76,7 @@ export default function ConnectionGate() {
       setConversations(data.conversations);
       setArchivedCount(data.archivedCount);
     } catch {}
+    finally { setConvsLoaded(true); }
   }
 
   function handleConnected(phone: string) {
@@ -189,6 +199,7 @@ export default function ConnectionGate() {
         onSearch={setSearch}
         viewLabel={view === "archived" ? "Archivados" : "Mensajes"}
         totalCount={conversations.length}
+        loading={!convsLoaded}
       />
 
       <main style={{ background: "var(--bg)", overflow: "hidden" }}>

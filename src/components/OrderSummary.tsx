@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Order, OrderStatus } from "@/lib/types";
+import { useEventStream } from "./useEventStream";
 
 interface Props {
   conversationId: number;
@@ -54,10 +55,13 @@ export default function OrderSummary({ conversationId }: Props) {
 
   useEffect(() => {
     fetchOrder();
-    const t = setInterval(fetchOrder, 4000);
-    return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
+
+  // SSE: refetch cuando hay cambios (en cualquier conv); barato porque la
+  // query es por conversationId y tiene LIMIT 1.
+  const onConvOrMsg = useCallback(() => { fetchOrder(); }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEventStream("/api/events", { conv: onConvOrMsg, msg: onConvOrMsg });
 
   async function fetchOrder() {
     try {

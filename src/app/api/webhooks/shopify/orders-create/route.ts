@@ -79,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Si el departamento o ciudad están en la blacklist (San Andrés, Amazonas,
   // Vaupés, Guainía, Vichada por default), creamos el pedido directamente
   // como CANCELLED y enviamos un mensaje amable con alternativa al cliente.
-  const zoneCheck = isBlockedZone(orderData.city, orderData.department);
+  const zoneCheck = isBlockedZone(orderData.city, orderData.department, parsed.departmentCode);
   if (zoneCheck.blocked) {
     const orderId = upsertOrder(conv.id, orderData, "CANCELLED", "SHOPIFY");
     const zoneLabel = zoneCheck.matchedDepartment ?? zoneCheck.matchedCity ?? "tu zona";

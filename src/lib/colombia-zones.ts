@@ -45,6 +45,16 @@ const DEFAULT_BLOCKED_CITIES = [
   "cumaribo"
 ];
 
+// Códigos ISO 3166-2 (province_code) de Shopify para los departamentos
+// bloqueados. Shopify a veces manda SOLO el código (ej: "VAU") sin el nombre
+// completo en `province`, así que también matcheamos contra estos.
+//   San Andrés y Providencia → SAP
+//   Amazonas                 → AMA
+//   Vaupés                   → VAU
+//   Guainía                  → GUA
+//   Vichada                  → VID
+const DEFAULT_BLOCKED_DEPARTMENT_CODES = ["sap", "ama", "vau", "gua", "vid"];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -74,6 +84,15 @@ function getConfiguredBlockedDepartments(): string[] {
 function getConfiguredBlockedCities(): string[] {
   const envValue = (process.env.SHOPIFY_BLOCKED_CITIES || "").trim();
   if (!envValue) return DEFAULT_BLOCKED_CITIES;
+  return envValue
+    .split(",")
+    .map(s => normalizeZoneName(s))
+    .filter(Boolean);
+}
+
+function getConfiguredBlockedDepartmentCodes(): string[] {
+  const envValue = (process.env.SHOPIFY_BLOCKED_DEPARTMENT_CODES || "").trim();
+  if (!envValue) return DEFAULT_BLOCKED_DEPARTMENT_CODES;
   return envValue
     .split(",")
     .map(s => normalizeZoneName(s))
@@ -177,13 +196,16 @@ export interface BlockedZoneResult {
  */
 export function isBlockedZone(
   city: string | null | undefined,
-  department: string | null | undefined
+  department: string | null | undefined,
+  departmentCode?: string | null | undefined
 ): BlockedZoneResult {
   const normCity = normalizeZoneName(city || "");
   const normDept = normalizeZoneName(department || "");
+  const normCode = normalizeZoneName(departmentCode || "");
 
   const blockedDepts  = getConfiguredBlockedDepartments();
   const blockedCities = getConfiguredBlockedCities();
+  const blockedCodes  = getConfiguredBlockedDepartmentCodes();
 
   // 1) Match por departamento (cualquier dept que contenga o sea contenido en blocked)
   for (const blocked of blockedDepts) {
@@ -194,6 +216,19 @@ export function isBlockedZone(
         matchedDepartment: department || undefined,
         reason: `Departamento "${department}" no cubierto`
       };
+    }
+  }
+
+  // 1b) Match por código de provincia (Shopify a veces solo manda "VAU", "SAP", etc.)
+  if (normCode) {
+    for (const blocked of blockedCodes) {
+      if (blocked && normCode === blocked) {
+        return {
+          blocked: true,
+          matchedDepartment: department || departmentCode || undefined,
+          reason: `Código de departamento "${departmentCode}" no cubierto`
+        };
+      }
     }
   }
 

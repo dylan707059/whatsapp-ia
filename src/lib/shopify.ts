@@ -81,6 +81,7 @@ export interface ParsedShopifyOrder {
   address: string;
   city: string;
   department: string;              // province
+  departmentCode: string;          // province_code (ej: "VAU", "SAP") — Shopify a veces solo manda esto
   currency: string;
   totalPrice: string;              // ej: "169900.00"
   isCOD: boolean;
@@ -107,6 +108,7 @@ export function parseShopifyOrder(payload: ShopifyOrderPayload): ParsedShopifyOr
                  || [bill.address1, bill.address2].filter(Boolean).join(", ").trim();
   const city     = (ship.city || bill.city || "").trim();
   const department = (ship.province || bill.province || "").trim();
+  const departmentCode = (ship.province_code || bill.province_code || "").trim();
 
   const orderNumber = payload.name || (payload.order_number ? `#${payload.order_number}` : `#${payload.id}`);
   const currency = payload.currency || "COP";
@@ -140,6 +142,7 @@ export function parseShopifyOrder(payload: ShopifyOrderPayload): ParsedShopifyOr
     address,
     city,
     department,
+    departmentCode,
     currency,
     totalPrice,
     isCOD,

@@ -8,6 +8,10 @@ interface Props {
   onSaved: () => void;
   // Si true, muestra un botón para continuar sin cambios (cuando ya hay config).
   allowSkip?: boolean;
+  // Si true, se renderiza como panel (sin pantalla completa) para incrustarlo
+  // en una columna (ej: junto al QR). Tras guardar muestra "✓ Guardado" en vez
+  // de navegar.
+  embedded?: boolean;
 }
 
 interface SettingsForm {
@@ -30,11 +34,12 @@ const EMPTY: SettingsForm = {
   ownerNotifyPhones: ""
 };
 
-export default function SettingsScreen({ onSaved, allowSkip = false }: Props) {
+export default function SettingsScreen({ onSaved, allowSkip = false, embedded = false }: Props) {
   const [form, setForm] = useState<SettingsForm>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [savedOk, setSavedOk] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -63,6 +68,7 @@ export default function SettingsScreen({ onSaved, allowSkip = false }: Props) {
 
   function update<K extends keyof SettingsForm>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+    setSavedOk(false);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -76,6 +82,7 @@ export default function SettingsScreen({ onSaved, allowSkip = false }: Props) {
         body: JSON.stringify(form)
       });
       if (res.ok) {
+        setSavedOk(true);
         onSaved();
         return;
       }
@@ -105,16 +112,23 @@ export default function SettingsScreen({ onSaved, allowSkip = false }: Props) {
     );
   }
 
+  const outerStyle: CSSProperties = embedded
+    ? { height: "100%", background: "var(--bg)", padding: "20px 16px", overflowY: "auto" }
+    : { minHeight: "100vh", background: "var(--bg)", padding: "40px 16px", overflowY: "auto" };
+  const innerStyle: CSSProperties = embedded
+    ? { maxWidth: "100%", margin: 0 }
+    : { maxWidth: 560, margin: "0 auto" };
+
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", padding: "40px 16px", overflowY: "auto" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <h1 style={{ color: "var(--text)", fontSize: 22, fontWeight: 600, margin: 0 }}>
+    <div style={outerStyle}>
+      <div style={innerStyle}>
+        <div style={{ textAlign: embedded ? "left" : "center", marginBottom: embedded ? 18 : 28 }}>
+          <h1 style={{ color: "var(--text)", fontSize: embedded ? 17 : 22, fontWeight: 600, margin: 0 }}>
             Configuración de tu tienda
           </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 8, lineHeight: 1.5 }}>
-            Configura tu Shopify y tus preferencias antes de conectar WhatsApp.
-            Los campos que dejes vacíos usarán los valores por defecto del sistema.
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
+            Configura tu Shopify y tus preferencias. Los campos que dejes vacíos
+            usarán los valores por defecto del sistema.
           </p>
         </div>
 
@@ -202,9 +216,15 @@ export default function SettingsScreen({ onSaved, allowSkip = false }: Props) {
             </p>
           )}
 
+          {savedOk && embedded && (
+            <p style={{ color: "#34d399", fontSize: 13, background: "rgba(52,211,153,0.1)", borderRadius: 8, padding: "8px 12px", margin: 0 }}>
+              ✓ Configuración guardada
+            </p>
+          )}
+
           <div style={{ display: "flex", gap: 12 }}>
             <button type="submit" disabled={saving} style={primaryBtn}>
-              {saving ? "Guardando…" : "Guardar y continuar"}
+              {saving ? "Guardando…" : embedded ? "Guardar" : "Guardar y continuar"}
             </button>
             {allowSkip && (
               <button type="button" onClick={onSaved} style={secondaryBtn}>

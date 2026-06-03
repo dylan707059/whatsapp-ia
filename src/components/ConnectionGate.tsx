@@ -181,8 +181,38 @@ export default function ConnectionGate() {
     return <SettingsScreen allowSkip onSaved={() => setShowSettings(false)} />;
   }
 
+  // Antes de conectar WhatsApp: panel de configuración a la izquierda + QR a la
+  // derecha. Al conectar, este layout desaparece y se muestra el dashboard.
   if (appStatus === "qr") {
-    return <QRScreen onConnected={handleConnected} />;
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", height: "100vh", background: "var(--bg)" }}>
+        <aside style={{ borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+            <SettingsScreen embedded onSaved={() => {}} />
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              borderTop: "1px solid var(--border)",
+              padding: "12px 16px",
+              color: "var(--text-muted)",
+              fontSize: 13,
+              textAlign: "left",
+              display: "flex", alignItems: "center", gap: 10,
+              flexShrink: 0
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            <span style={{ width: 16, opacity: 0.7 }}>🚪</span>
+            Cerrar sesión
+          </button>
+        </aside>
+        <div style={{ minHeight: 0, overflowY: "auto" }}>
+          <QRScreen onConnected={handleConnected} />
+        </div>
+      </div>
+    );
   }
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);

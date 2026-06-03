@@ -254,6 +254,17 @@ db.exec(`
     configured                 INTEGER NOT NULL DEFAULT 0,
     updated_at                 INTEGER NOT NULL DEFAULT (unixepoch())
   );
+
+  -- Estado de conexión de WhatsApp POR CUENTA (multi-tenant). Reemplaza el uso
+  -- de la tabla global connection_state. Cada cuenta tiene su propio socket,
+  -- su propio QR y su propio número conectado.
+  CREATE TABLE IF NOT EXISTS account_connections (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    status     TEXT NOT NULL DEFAULT 'disconnected',
+    qr_string  TEXT,
+    phone      TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
 `);
 
 // ─── 2. Migraciones — solo para bases de datos antiguas ───────────────────────
@@ -932,6 +943,74 @@ export function getActiveAccountSettings(): AccountSettings | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ─── Conexión de WhatsApp por cuenta (multi-tenant) ───────────────────────────
+export interface AccountConnection {
+  account_id: number;
+  status: ConnectionStatus;
+  qr_string: string | null;
+  phone: string | null;
+  updated_at: number;
+}
+
+const stmtGetAcctConn = db.prepare<[number], AccountConnection>(
+  "SELECT * FROM account_connections WHERE account_id = ?"
+);
+const stmtUpsertAcctConn = db.prepare(`
+  INSERT INTO account_connections (account_id, status, qr_string, phone, updated_at)
+  VALUES (?, ?, ?, ?, unixepoch())
+  ON CONFLICT(account_id) DO UPDATE SET
+    status     = excluded.status,
+    qr_string  = excluded.qr_string,
+    phone      = excluded.phone,
+    updated_at = unixepoch()
+`);
+const stmtListAccounts = db.prepare<[], Account>(
+  "SELECT * FROM accounts ORDER BY id ASC"
+);
+const stmtSetAcctOwnerPhone = db.prepare<[string, number]>(
+  "UPDATE accounts SET owner_phone = ? WHERE id = ?"
+);
+const stmtGetAccountByOwnerPhone = db.prepare<[string], Account>(
+  "SELECT * FROM accounts WHERE owner_phone = ? LIMIT 1"
+);
+
+export function getAccountConnection(accountId: number): AccountConnection {
+  return (
+    stmtGetAcctConn.get(accountId) ?? {
+      account_id: accountId,
+      status: "disconnected",
+      qr_string: null,
+      phone: null,
+      updated_at: 0
+    }
+  );
+}
+
+export function setAccountConnection(
+  accountId: number,
+  patch: { status: ConnectionStatus; qr_string?: string | null; phone?: string | null }
+): void {
+  const current = getAccountConnection(accountId);
+  stmtUpsertAcctConn.run(
+    accountId,
+    patch.status,
+    patch.qr_string !== undefined ? patch.qr_string : current.qr_string,
+    patch.phone !== undefined ? patch.phone : current.phone
+  );
+}
+
+export function listAllAccounts(): Account[] {
+  return stmtListAccounts.all();
+}
+
+export function setAccountOwnerPhone(accountId: number, phone: string): void {
+  stmtSetAcctOwnerPhone.run(phone, accountId);
+}
+
+export function getAccountByOwnerPhone(phone: string): Account | undefined {
+  return stmtGetAccountByOwnerPhone.get(phone);
 }
 
 // ─── Auto-seed de la cuenta inicial desde variables de entorno ────────────────

@@ -21,7 +21,9 @@ export type OrderEventType =
   | "CLIENT_CONFIRMED"
   | "OWNER_NOTIFICATION_STARTED"
   | "OWNER_NOTIFIED"
-  | "OWNER_NOTIFICATION_ERROR";
+  | "OWNER_NOTIFICATION_ERROR"
+  | "SHOPIFY_ORDER_RECEIVED"
+  | "SHOPIFY_ORDER_DUPLICATE";
 
 export interface OrderEventInput {
   orderId?: number | null;

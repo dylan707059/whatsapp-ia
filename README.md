@@ -227,6 +227,67 @@ OPENAI_MODEL=gpt-4o-mini
 OWNER_NOTIFY_PHONES=573204665094,573223272342
 ```
 
+## Integración con Shopify
+
+Cuando llega un pedido nuevo a Shopify, el bot envía automáticamente un
+WhatsApp al cliente pidiendo confirmar los datos antes de despachar.
+
+### Cómo funciona
+
+1. Shopify dispara el webhook `orders/create` cuando se crea un pedido.
+2. El endpoint `/api/webhooks/shopify/orders-create` valida la firma HMAC.
+3. Se crea/encuentra la conversación del cliente en SQLite y se registra
+   un `Order` con `status='PENDING_CONFIRMATION'` y `source='SHOPIFY'`.
+4. Se encola un mensaje en `outbox` con el detalle del pedido pidiendo que
+   responda **CONFIRMADO**.
+5. La conversación se setea a modo `HUMAN` para que la IA no responda en
+   paralelo. Si querés que la IA conteste, togglealo manualmente desde el
+   dashboard.
+6. Cuando el cliente responde **CONFIRMADO** se dispara el flujo existente
+   de `order-confirmation.ts` y se notifica al owner.
+
+### Anti-duplicados
+
+El endpoint usa `computeOrderHash()` (mismo que el flujo `/fotoconfirmar`)
+para detectar si el mismo pedido ya fue procesado. Si Shopify reenvía el
+webhook por reintento, el segundo intento responde `200 OK skipped=duplicate`
+sin reenviar el mensaje al cliente.
+
+### Setup en Shopify Admin
+
+1. Ir a **Settings → Notifications → Webhooks** (al final de la página).
+2. **Create webhook**:
+   - **Event:** `Order creation`
+   - **Format:** `JSON`
+   - **URL:** `https://TU-DOMINIO-RENDER.onrender.com/api/webhooks/shopify/orders-create`
+   - **Webhook API version:** la más reciente.
+3. Guardar. Justo arriba de la lista aparece el texto
+   *"Tus webhooks se firmarán con `XXXXXX...`"* — ese es el secret.
+4. En Render → tu servicio → **Environment** → agregar:
+   ```
+   SHOPIFY_WEBHOOK_SECRET=XXXXXX...
+   ```
+5. Render reinicia automáticamente al guardar la variable.
+
+### Probar el webhook
+
+Desde el panel de webhooks en Shopify Admin click **"..." → Enviar prueba**.
+Si todo está OK ves en los logs de Render:
+```
+[shopify] Pedido #XXXX → conv #N (5730...) — mensaje encolado en outbox
+[bot] → Outbox enviado a 5730...@s.whatsapp.net
+```
+
+### Limitaciones actuales
+
+- Solo procesa pedidos con teléfono. Si el customer no dejó teléfono el
+  webhook responde `200 OK skipped=no_phone`.
+- Si el bot está desconectado al momento del webhook, el mensaje queda
+  encolado en `outbox` y se envía al reconectar.
+- El parsing asume que las variantes vienen como `"Color / Talla"`. Si
+  tu catálogo usa otro formato, ajustar `toOrderData()` en
+  `src/lib/shopify.ts`.
+
 ## Mejoras pendientes
 
 - Autenticación en el dashboard (Basic Auth o JWT)

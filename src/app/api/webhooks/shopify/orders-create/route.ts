@@ -1,0 +1,133 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  getConnectionState,
+  getOrCreateConversation,
+  enqueueOutbox,
+  insertMessage,
+  setConversationMode
+} from "@/lib/db";
+import { upsertOrder, computeOrderHash, findOrderByHash } from "@/lib/orders";
+import { normalizePhone, phoneToJid } from "@/lib/phone-utils";
+import {
+  verifyShopifyHmac,
+  parseShopifyOrder,
+  toOrderData,
+  buildConfirmationMessage,
+  type ShopifyOrderPayload
+} from "@/lib/shopify";
+import { insertOrderEvent } from "@/lib/order-events";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  // ─── 1. Leer body crudo (necesario para validar HMAC) ──────────────────────
+  const rawBody = Buffer.from(await req.arrayBuffer());
+  const hmac = req.headers.get("x-shopify-hmac-sha256");
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+
+  // ─── 2. Validar firma HMAC ────────────────────────────────────────────────
+  if (!verifyShopifyHmac(rawBody, hmac, secret)) {
+    console.warn("[shopify] HMAC inválido — webhook rechazado");
+    return NextResponse.json({ error: "invalid hmac" }, { status: 401 });
+  }
+
+  // ─── 3. Parsear el payload ─────────────────────────────────────────────────
+  let payload: ShopifyOrderPayload;
+  try {
+    payload = JSON.parse(rawBody.toString("utf8")) as ShopifyOrderPayload;
+  } catch (err) {
+    console.error("[shopify] JSON inválido en webhook", err);
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+
+  const parsed = parseShopifyOrder(payload);
+
+  if (!parsed.rawPhone) {
+    console.warn(`[shopify] Pedido ${parsed.orderNumber} sin teléfono — se ignora`);
+    return NextResponse.json({ ok: true, skipped: "no_phone" });
+  }
+
+  // ─── 4. Verificar que haya un bot conectado ────────────────────────────────
+  const conn = getConnectionState();
+  const ownerPhone = conn.phone ?? "";
+  if (conn.status !== "connected" || !ownerPhone) {
+    console.warn(
+      `[shopify] Pedido ${parsed.orderNumber} recibido pero el bot no está conectado. ` +
+      "El mensaje quedará encolado en outbox y se enviará al reconectar."
+    );
+    // No retornamos error: igual encolamos para que se envíe al reconectar.
+  }
+
+  // ─── 5. Crear/obtener conversación del cliente ────────────────────────────
+  const customerJid = phoneToJid(parsed.rawPhone);
+  const conv = getOrCreateConversation(customerJid, parsed.fullName, ownerPhone);
+
+  // Pasar a modo HUMAN para que la IA no responda automáticamente al cliente.
+  // El owner puede toggle a AI manualmente desde el dashboard si quiere.
+  setConversationMode(conv.id, "HUMAN");
+
+  // ─── 6. Anti-duplicado por hash del pedido ────────────────────────────────
+  const orderData = toOrderData(parsed, conv.id);
+  const hash = computeOrderHash({
+    phone:      orderData.phone,
+    product:    orderData.product,
+    color:      orderData.color,
+    size:       orderData.size,
+    quantity:   orderData.quantity,
+    total:      orderData.total,
+    address:    orderData.address,
+    city:       orderData.city,
+    department: orderData.department
+  });
+
+  const duplicate = findOrderByHash(hash);
+  if (duplicate) {
+    insertOrderEvent({
+      orderId: duplicate.id,
+      conversationId: conv.id,
+      eventType: "SHOPIFY_ORDER_DUPLICATE",
+      message: `Webhook duplicado para pedido ${parsed.orderNumber} (hash ${hash})`,
+      metadata: { shopifyOrderId: parsed.orderId, shopifyOrderNumber: parsed.orderNumber }
+    });
+    console.log(
+      `[shopify] Pedido ${parsed.orderNumber} duplicado (hash ${hash}) — ` +
+      `ya existe order #${duplicate.id}, se ignora reenvío`
+    );
+    return NextResponse.json({ ok: true, skipped: "duplicate", orderId: duplicate.id });
+  }
+
+  // ─── 7. Crear el pedido en SQLite ──────────────────────────────────────────
+  const orderId = upsertOrder(conv.id, orderData, "PENDING_CONFIRMATION", "SHOPIFY");
+
+  insertOrderEvent({
+    orderId,
+    conversationId: conv.id,
+    eventType: "SHOPIFY_ORDER_RECEIVED",
+    message: `Pedido ${parsed.orderNumber} recibido desde Shopify`,
+    metadata: {
+      shopifyOrderId: parsed.orderId,
+      shopifyOrderNumber: parsed.orderNumber,
+      total: parsed.totalPrice,
+      currency: parsed.currency,
+      itemsCount: parsed.items.length
+    }
+  });
+
+  // ─── 8. Encolar el mensaje de confirmación ─────────────────────────────────
+  const message = buildConfirmationMessage(parsed);
+  insertMessage(conv.id, "assistant", message);
+  enqueueOutbox(conv.id, conv.phone, message);
+
+  console.log(
+    `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +
+    `mensaje encolado en outbox`
+  );
+
+  return NextResponse.json({
+    ok: true,
+    conversationId: conv.id,
+    orderId,
+    customerPhone: normalizePhone(parsed.rawPhone)
+  });
+}

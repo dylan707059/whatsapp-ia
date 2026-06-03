@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { start, getHandle } from "../src/lib/baileys/client";
 import {
-  getPendingOutbox, claimOutboxItem, getConnectionState, enqueueOutbox, insertMessage,
+  getPendingOutbox, claimOutboxItem, unclaimOutboxItem, getConnectionState, enqueueOutbox, insertMessage,
   setMessageWaId,
   getPendingRevokes, markRevokeDone
 } from "../src/lib/db";
@@ -44,7 +44,8 @@ setInterval(async () => {
         try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
       }
     } catch (err) {
-      console.error(`[bot] Error enviando outbox #${item.id} (NO se reintenta):`, err);
+      console.error(`[bot] Error enviando outbox #${item.id}, revirtiendo para reintentar:`, err);
+      try { unclaimOutboxItem(item.id); } catch {}
     }
   }
 

@@ -478,6 +478,14 @@ export function claimOutboxItem(id: number): boolean {
   return result.changes > 0;
 }
 
+const stmtUnclaimOutbox = db.prepare<[number]>(
+  "UPDATE outbox SET sent = 0 WHERE id = ? AND sent = 1"
+);
+
+export function unclaimOutboxItem(id: number): void {
+  stmtUnclaimOutbox.run(id);
+}
+
 /**
  * Adelanta todos los mensajes pendientes (futuros) de una conversación
  * para que se envíen en el próximo tick del poller.

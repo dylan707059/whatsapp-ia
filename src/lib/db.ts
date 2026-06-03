@@ -313,6 +313,17 @@ db.exec(`
   if (!cols.includes("wa_msg_id"))  db.exec("ALTER TABLE messages ADD COLUMN wa_msg_id TEXT");
   if (!cols.includes("wa_from_me")) db.exec("ALTER TABLE messages ADD COLUMN wa_from_me INTEGER NOT NULL DEFAULT 0");
 }
+{
+  // account_connections pudo crearse en un deploy previo sin wanted_at.
+  const tableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='account_connections'"
+  ).get();
+  if (tableExists) {
+    const cols = (db.prepare("PRAGMA table_info(account_connections)").all() as { name: string }[])
+      .map(c => c.name);
+    if (!cols.includes("wanted_at")) db.exec("ALTER TABLE account_connections ADD COLUMN wanted_at INTEGER");
+  }
+}
 
 // ─── 3. Exportar instancia ────────────────────────────────────────────────────
 export { db };

@@ -2,7 +2,7 @@ import "./env-loader";
 
 import fs from "node:fs";
 import path from "node:path";
-import { start, listHandles, isManaged, stopAndWipe } from "../src/lib/baileys/client";
+import { start, listHandles, isManaged, stopAccount, stopAndWipe } from "../src/lib/baileys/client";
 import {
   getPendingOutbox, claimOutboxItem, unclaimOutboxItem, enqueueOutbox, insertMessage,
   setMessageWaId, getPendingRevokes, markRevokeDone,
@@ -15,7 +15,7 @@ import {
   setOrderStatus
 } from "../src/lib/orders";
 import { insertOrderEvent } from "../src/lib/order-events";
-import { DATA_DIR } from "../src/lib/paths";
+import { AUTH_DIR, DATA_DIR } from "../src/lib/paths";
 
 // Escribir PID para que Next.js (instrumentation.ts) detecte que ya estamos corriendo
 fs.writeFileSync(path.join(DATA_DIR, "bot.pid"), String(process.pid));
@@ -33,15 +33,42 @@ function handleForPhone(phone: string) {
   return undefined;
 }
 
-// ─── Asegurar un socket por cuenta ────────────────────────────────────────────
-// Cada cuenta tiene su propia conexión de WhatsApp. Si una cuenta no tiene
-// socket vivo (recién creada, o se cayó), lo arrancamos. Idempotente.
+// ─── Asegurar conexiones (lazy, para no agotar memoria) ───────────────────────
+// Solo mantenemos conexión de WhatsApp para cuentas que:
+//   - ya están conectadas (tienen credenciales y reciben mensajes), o
+//   - tienen credenciales guardadas (se conectaron antes), o
+//   - fueron "deseadas" hace poco (su dashboard/QR consultó estado < 2 min).
+// Arrancamos de a UNA por tick (stagger) para no picar la RAM, y soltamos las
+// conexiones de cuentas inactivas (ej: un QR que el usuario abandonó).
+
+const WANTED_WINDOW_SEC = 120;
+
+function credsExist(accountId: number): boolean {
+  try {
+    return fs.existsSync(path.join(AUTH_DIR, String(accountId), "creds.json"));
+  } catch {
+    return false;
+  }
+}
 
 function ensureAccountsConnected() {
+  const now = Math.floor(Date.now() / 1000);
+  let startedOne = false;
+
   for (const acc of listAllAccounts()) {
-    if (!isManaged(acc.id)) {
-      console.log(`[bot] Iniciando socket para cuenta ${acc.id} (${acc.email})`);
-      start(acc.id).catch((e) => console.error(`[bot] Error iniciando cuenta ${acc.id}:`, e));
+    const conn = getAccountConnection(acc.id);
+    const wanted = conn.wanted_at != null && now - conn.wanted_at < WANTED_WINDOW_SEC;
+    const shouldRun = conn.status === "connected" || credsExist(acc.id) || wanted;
+
+    if (shouldRun) {
+      if (!isManaged(acc.id) && !startedOne) {
+        console.log(`[bot] Iniciando socket para cuenta ${acc.id} (${acc.email})`);
+        start(acc.id).catch((e) => console.error(`[bot] Error iniciando cuenta ${acc.id}:`, e));
+        startedOne = true; // de a una por tick
+      }
+    } else if (isManaged(acc.id)) {
+      // Cuenta inactiva con socket vivo (típicamente un QR abandonado): soltar.
+      stopAccount(acc.id).catch((e) => console.error(`[bot] Error deteniendo cuenta ${acc.id}:`, e));
     }
   }
 }

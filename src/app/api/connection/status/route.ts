@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
-import { getAccountConnection } from "@/lib/db";
+import { getAccountConnection, markAccountWanted } from "@/lib/db";
 import { accountFromRequest } from "@/lib/request-account";
 
 export const runtime = "nodejs";
@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
   if (!account) {
     return NextResponse.json({ status: "disconnected" }, { status: 401 });
   }
+
+  // Señala que esta cuenta está activa para que el bot mantenga/levante su
+  // conexión (y libere las de cuentas inactivas — clave en 512MB de RAM).
+  markAccountWanted(account.id);
 
   const state = getAccountConnection(account.id);
 

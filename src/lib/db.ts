@@ -263,6 +263,7 @@ db.exec(`
     status     TEXT NOT NULL DEFAULT 'disconnected',
     qr_string  TEXT,
     phone      TEXT,
+    wanted_at  INTEGER,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
 `);
@@ -965,11 +966,18 @@ export interface AccountConnection {
   status: ConnectionStatus;
   qr_string: string | null;
   phone: string | null;
+  wanted_at: number | null;
   updated_at: number;
 }
 
 const stmtGetAcctConn = db.prepare<[number], AccountConnection>(
   "SELECT * FROM account_connections WHERE account_id = ?"
+);
+const stmtEnsureConnRow = db.prepare(
+  "INSERT INTO account_connections (account_id, status) VALUES (?, 'disconnected') ON CONFLICT(account_id) DO NOTHING"
+);
+const stmtMarkWanted = db.prepare<[number]>(
+  "UPDATE account_connections SET wanted_at = unixepoch() WHERE account_id = ?"
 );
 const stmtUpsertAcctConn = db.prepare(`
   INSERT INTO account_connections (account_id, status, qr_string, phone, updated_at)
@@ -997,9 +1005,21 @@ export function getAccountConnection(accountId: number): AccountConnection {
       status: "disconnected",
       qr_string: null,
       phone: null,
+      wanted_at: null,
       updated_at: 0
     }
   );
+}
+
+/**
+ * Marca que la cuenta está siendo usada activamente (el dashboard/QR de esa
+ * cuenta consultó su estado). El bot solo mantiene conexiones de WhatsApp para
+ * cuentas "deseadas" recientemente o ya conectadas — así no arranca todas a la
+ * vez y no se queda sin memoria.
+ */
+export function markAccountWanted(accountId: number): void {
+  stmtEnsureConnRow.run(accountId);
+  stmtMarkWanted.run(accountId);
 }
 
 export function setAccountConnection(

@@ -187,6 +187,18 @@ export function listHandles(): BaileysHandle[] {
   return [...handles.values()];
 }
 
+/** Detiene el socket de una cuenta SIN borrar sus credenciales (para liberar
+ *  memoria de cuentas inactivas; reconecta sola al volver a usarse). */
+export async function stopAccount(accountId: number): Promise<void> {
+  const h = handles.get(accountId);
+  if (h) {
+    try { await h.shutdown(); } catch {}
+    handles.delete(accountId);
+  }
+  const timer = reconnectTimers.get(accountId);
+  if (timer) { clearTimeout(timer); reconnectTimers.delete(accountId); }
+}
+
 /** Desconecta una cuenta, borra sus credenciales y deja su estado en disconnected. */
 export async function stopAndWipe(accountId: number): Promise<void> {
   const h = handles.get(accountId);

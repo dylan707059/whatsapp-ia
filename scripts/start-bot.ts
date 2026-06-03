@@ -30,7 +30,8 @@ setInterval(async () => {
   if (!handle) return;
   if (getConnectionState().status !== "connected") return;
 
-  for (const item of getPendingOutbox(20)) {
+  const ownerPhone = getConnectionState().phone ?? "";
+  for (const item of getPendingOutbox(ownerPhone, 20)) {
     if (!claimOutboxItem(item.id)) continue;
     try {
       const result = await handle.sock.sendMessage(item.phone, { text: item.content });
@@ -106,10 +107,12 @@ function buildAutoCancelText(customerFirstName: string | null, orderNumber: stri
 }
 
 setInterval(() => {
-  if (getConnectionState().status !== "connected") return;
+  const state = getConnectionState();
+  if (state.status !== "connected") return;
+  const currentOwner = state.phone ?? "";
 
   // 1) Enviar recordatorios
-  for (const order of getOrdersNeedingReminder(REMINDER_MAX, REMINDER_INTERVAL)) {
+  for (const order of getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
     try {
       const attemptNumber = order.reminder_count + 1;
       const orderNumberText = order.id ? `#${order.id}` : "";
@@ -133,7 +136,7 @@ setInterval(() => {
   }
 
   // 2) Cancelar pedidos que ya agotaron recordatorios
-  for (const order of getOrdersToAutoCancel(REMINDER_MAX, REMINDER_INTERVAL)) {
+  for (const order of getOrdersToAutoCancel(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
     try {
       const orderNumberText = order.id ? `#${order.id}` : "";
       const text = buildAutoCancelText(order.first_name, orderNumberText);

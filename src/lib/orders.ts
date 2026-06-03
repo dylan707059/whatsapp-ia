@@ -201,7 +201,7 @@ export function getTodayStats(): TodayStats {
 // (mensaje del cliente, manual del owner o del bot) en las últimas N horas.
 // Si hubo actividad, el cliente ya está conversando -> no spam con recordatorio.
 const stmtOrdersNeedingReminder = db.prepare<
-  [number, number, number],
+  [string, number, number, number],
   Order & { conv_name: string | null; conv_phone: string }
 >(`
   SELECT o.*, c.name as conv_name, c.phone as conv_phone
@@ -209,6 +209,7 @@ const stmtOrdersNeedingReminder = db.prepare<
   JOIN conversations c ON o.conversation_id = c.id
   WHERE o.source = 'SHOPIFY'
     AND o.status = 'PENDING_CONFIRMATION'
+    AND c.owner_phone = ?
     AND o.reminder_count < ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?
     AND NOT EXISTS (
@@ -221,7 +222,7 @@ const stmtOrdersNeedingReminder = db.prepare<
 `);
 
 const stmtOrdersToCancel = db.prepare<
-  [number, number, number],
+  [string, number, number, number],
   Order & { conv_name: string | null; conv_phone: string }
 >(`
   SELECT o.*, c.name as conv_name, c.phone as conv_phone
@@ -229,6 +230,7 @@ const stmtOrdersToCancel = db.prepare<
   JOIN conversations c ON o.conversation_id = c.id
   WHERE o.source = 'SHOPIFY'
     AND o.status = 'PENDING_CONFIRMATION'
+    AND c.owner_phone = ?
     AND o.reminder_count >= ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?
     AND NOT EXISTS (
@@ -255,6 +257,7 @@ const stmtIncrementReminder = db.prepare<[number]>(
  *                     en las últimas 2h, no recordamos)
  */
 export function getOrdersNeedingReminder(
+  ownerPhone: string,
   maxReminders = 2,
   intervalSec = 7200,
   quietSec = intervalSec
@@ -262,7 +265,7 @@ export function getOrdersNeedingReminder(
   const now = Math.floor(Date.now() / 1000);
   const threshold = now - intervalSec;
   const quietThreshold = now - quietSec;
-  return stmtOrdersNeedingReminder.all(maxReminders, threshold, quietThreshold);
+  return stmtOrdersNeedingReminder.all(ownerPhone, maxReminders, threshold, quietThreshold);
 }
 
 /**
@@ -271,6 +274,7 @@ export function getOrdersNeedingReminder(
  * También respeta la ventana de quiet (no cancela si hay actividad reciente).
  */
 export function getOrdersToAutoCancel(
+  ownerPhone: string,
   maxReminders = 2,
   intervalSec = 7200,
   quietSec = intervalSec
@@ -278,7 +282,7 @@ export function getOrdersToAutoCancel(
   const now = Math.floor(Date.now() / 1000);
   const threshold = now - intervalSec;
   const quietThreshold = now - quietSec;
-  return stmtOrdersToCancel.all(maxReminders, threshold, quietThreshold);
+  return stmtOrdersToCancel.all(ownerPhone, maxReminders, threshold, quietThreshold);
 }
 
 export function incrementReminderCount(orderId: number): void {

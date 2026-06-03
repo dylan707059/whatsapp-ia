@@ -411,9 +411,15 @@ export function setConnectionState(patch: {
 const stmtEnqueue = db.prepare<[number, string, string, number, number | null]>(
   "INSERT INTO outbox (conversation_id, phone, content, scheduled_at, message_id) VALUES (?, ?, ?, ?, ?)"
 );
-const stmtPendingOutbox = db.prepare<[number], OutboxItem>(
-  "SELECT * FROM outbox WHERE sent = 0 AND scheduled_at <= unixepoch() ORDER BY created_at ASC LIMIT ?"
-);
+const stmtPendingOutbox = db.prepare<[string, number], OutboxItem>(`
+  SELECT o.* FROM outbox o
+  JOIN conversations c ON c.id = o.conversation_id
+  WHERE o.sent = 0
+    AND o.scheduled_at <= unixepoch()
+    AND c.owner_phone = ?
+  ORDER BY o.created_at ASC
+  LIMIT ?
+`);
 const stmtMarkSent = db.prepare<[number]>(
   "UPDATE outbox SET sent = 1 WHERE id = ?"
 );
@@ -454,8 +460,8 @@ export function enqueueOutbox(
   return true;
 }
 
-export function getPendingOutbox(limit = 20): OutboxItem[] {
-  return stmtPendingOutbox.all(limit);
+export function getPendingOutbox(ownerPhone: string, limit = 20): OutboxItem[] {
+  return stmtPendingOutbox.all(ownerPhone, limit);
 }
 
 export function markOutboxSent(id: number): void {

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { db, getConnectionState } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,17 +43,20 @@ const stmtMsgMax = db.prepare<[], { mx: number | null }>(
 const stmtConvLabelTs = db.prepare<[], { ts: number | null }>(
   "SELECT COALESCE(MAX(created_at), 0) AS ts FROM conversation_labels"
 );
+const stmtConnMax = db.prepare<[], { ts: number | null }>(
+  "SELECT COALESCE(MAX(updated_at), 0) AS ts FROM account_connections"
+);
 
 function readSnapshot(): Snapshot {
   const c = stmtConvSnap.get() ?? { ts: 0, cnt: 0 };
   const m = stmtMsgMax.get() ?? { mx: 0 };
   const cl = stmtConvLabelTs.get() ?? { ts: 0 };
-  const conn = getConnectionState();
+  const conn = stmtConnMax.get() ?? { ts: 0 };
   return {
     convMaxTs: Math.max(c.ts ?? 0, cl.ts ?? 0),
     convCount: c.cnt ?? 0,
     msgMaxId: m.mx ?? 0,
-    connUpdatedAt: conn.updated_at ?? 0
+    connUpdatedAt: conn.ts ?? 0
   };
 }
 

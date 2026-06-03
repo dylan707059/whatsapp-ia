@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getConnectionState,
   getOrCreateConversation,
   enqueueOutbox,
   insertMessage,
   setConversationMode,
-  getActiveAccountSettings
+  getActiveAccountSettings,
+  getAccountSettingsByShopDomain,
+  getAccountById,
+  getAccountConnection
 } from "@/lib/db";
 import { upsertOrder, computeOrderHash, findOrderByHash } from "@/lib/orders";
 import { normalizePhone, phoneToJid } from "@/lib/phone-utils";
@@ -31,8 +33,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ─── 1. Leer body crudo (necesario para validar HMAC) ──────────────────────
   const rawBody = Buffer.from(await req.arrayBuffer());
   const hmac = req.headers.get("x-shopify-hmac-sha256");
-  // Prefiere el secret configurado en la cuenta; cae a la variable de entorno.
-  const settings = getActiveAccountSettings();
+  // Identifica la cuenta dueña por el dominio de la tienda (multi-tenant).
+  // Cae a la primera cuenta configurada si no hay match por dominio.
+  const shopDomain = req.headers.get("x-shopify-shop-domain") ?? "";
+  const settings = getAccountSettingsByShopDomain(shopDomain) ?? getActiveAccountSettings();
   const secret = settings?.shopify_webhook_secret?.trim() || process.env.SHOPIFY_WEBHOOK_SECRET;
 
   // ─── 2. Validar firma HMAC ────────────────────────────────────────────────
@@ -57,12 +61,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, skipped: "no_phone" });
   }
 
-  // ─── 4. Verificar que haya un bot conectado ────────────────────────────────
-  const conn = getConnectionState();
-  const ownerPhone = conn.phone ?? "";
-  if (conn.status !== "connected" || !ownerPhone) {
+  // ─── 4. Resolver la cuenta dueña y su número conectado ─────────────────────
+  const account = settings ? getAccountById(settings.account_id) : undefined;
+  const ownerPhone = account?.owner_phone ?? "";
+  const conn = account ? getAccountConnection(account.id) : undefined;
+  if (!ownerPhone || conn?.status !== "connected") {
     console.warn(
-      `[shopify] Pedido ${parsed.orderNumber} recibido pero el bot no está conectado. ` +
+      `[shopify] Pedido ${parsed.orderNumber} recibido pero la cuenta no está conectada. ` +
       "El mensaje quedará encolado en outbox y se enviará al reconectar."
     );
     // No retornamos error: igual encolamos para que se envíe al reconectar.

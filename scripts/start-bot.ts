@@ -2,11 +2,11 @@ import "./env-loader";
 
 import fs from "node:fs";
 import path from "node:path";
-import { start, getHandle } from "../src/lib/baileys/client";
+import { start, listHandles, isManaged, stopAndWipe } from "../src/lib/baileys/client";
 import {
-  getPendingOutbox, claimOutboxItem, unclaimOutboxItem, getConnectionState, enqueueOutbox, insertMessage,
-  setMessageWaId,
-  getPendingRevokes, markRevokeDone
+  getPendingOutbox, claimOutboxItem, unclaimOutboxItem, enqueueOutbox, insertMessage,
+  setMessageWaId, getPendingRevokes, markRevokeDone,
+  listAllAccounts, getAccountConnection, getConversationById
 } from "../src/lib/db";
 import {
   getOrdersNeedingReminder,
@@ -15,7 +15,7 @@ import {
   setOrderStatus
 } from "../src/lib/orders";
 import { insertOrderEvent } from "../src/lib/order-events";
-import { AUTH_DIR, DATA_DIR, RESTART_FLAG } from "../src/lib/paths";
+import { DATA_DIR } from "../src/lib/paths";
 
 // Escribir PID para que Next.js (instrumentation.ts) detecte que ya estamos corriendo
 fs.writeFileSync(path.join(DATA_DIR, "bot.pid"), String(process.pid));
@@ -23,58 +23,71 @@ process.on("exit", () => {
   try { fs.unlinkSync(path.join(DATA_DIR, "bot.pid")); } catch {}
 });
 
-// ─── Outbox poller ────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Devuelve el handle (socket) de la cuenta cuyo número conectado es `phone`.
+function handleForPhone(phone: string) {
+  for (const h of listHandles()) {
+    if (getAccountConnection(h.accountId).phone === phone) return h;
+  }
+  return undefined;
+}
+
+// ─── Asegurar un socket por cuenta ────────────────────────────────────────────
+// Cada cuenta tiene su propia conexión de WhatsApp. Si una cuenta no tiene
+// socket vivo (recién creada, o se cayó), lo arrancamos. Idempotente.
+
+function ensureAccountsConnected() {
+  for (const acc of listAllAccounts()) {
+    if (!isManaged(acc.id)) {
+      console.log(`[bot] Iniciando socket para cuenta ${acc.id} (${acc.email})`);
+      start(acc.id).catch((e) => console.error(`[bot] Error iniciando cuenta ${acc.id}:`, e));
+    }
+  }
+}
+
+setInterval(ensureAccountsConnected, 5000);
+
+// ─── Outbox poller (por cuenta) ───────────────────────────────────────────────
 
 setInterval(async () => {
-  const handle = getHandle();
-  if (!handle) return;
-  if (getConnectionState().status !== "connected") return;
+  for (const h of listHandles()) {
+    const conn = getAccountConnection(h.accountId);
+    if (conn.status !== "connected" || !conn.phone) continue;
 
-  const ownerPhone = getConnectionState().phone ?? "";
-  for (const item of getPendingOutbox(ownerPhone, 20)) {
-    if (!claimOutboxItem(item.id)) continue;
-    try {
-      const result = await handle.sock.sendMessage(item.phone, { text: item.content });
-      console.log(`[bot] → Outbox enviado a ${item.phone}`);
-
-      // Guardar el wa_msg_id en la fila de messages asociada para poder
-      // revocar el mensaje más tarde si el owner lo borra "para todos".
-      const waMsgId = result?.key?.id;
-      if (waMsgId && item.message_id) {
-        try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
+    for (const item of getPendingOutbox(conn.phone, 20)) {
+      if (!claimOutboxItem(item.id)) continue;
+      try {
+        const result = await h.sock.sendMessage(item.phone, { text: item.content });
+        const waMsgId = result?.key?.id;
+        if (waMsgId && item.message_id) {
+          try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
+        }
+      } catch (err) {
+        console.error(`[bot] (acc ${h.accountId}) Error enviando outbox #${item.id}, revirtiendo:`, err);
+        try { unclaimOutboxItem(item.id); } catch {}
       }
-    } catch (err) {
-      console.error(`[bot] Error enviando outbox #${item.id}, revirtiendo para reintentar:`, err);
-      try { unclaimOutboxItem(item.id); } catch {}
     }
   }
 
-  // Procesar revokes pendientes (delete para todos)
+  // Revokes pendientes (delete para todos) — vía el socket de la cuenta dueña.
   for (const r of getPendingRevokes(10)) {
+    const conv = getConversationById(r.conversation_id);
+    const h = conv ? handleForPhone(conv.owner_phone) : undefined;
+    if (!h) continue; // sin socket para esa cuenta ahora; se reintenta luego
     try {
-      await handle.sock.sendMessage(r.remote_jid, {
-        delete: {
-          remoteJid: r.remote_jid,
-          fromMe:    r.wa_from_me === 1,
-          id:        r.wa_msg_id
-        }
+      await h.sock.sendMessage(r.remote_jid, {
+        delete: { remoteJid: r.remote_jid, fromMe: r.wa_from_me === 1, id: r.wa_msg_id }
       });
       markRevokeDone(r.id);
-      console.log(`[bot] 🗑 Mensaje ${r.wa_msg_id} revocado en ${r.remote_jid}`);
     } catch (err) {
       console.error(`[bot] Error revocando ${r.wa_msg_id}:`, err);
-      // Marca igual para no quedar atascado — WhatsApp tiene ventana ~1h
-      markRevokeDone(r.id);
+      markRevokeDone(r.id); // no quedar atascado — WhatsApp tiene ventana ~1h
     }
   }
 }, 2000);
 
-// ─── Recordatorios de pedidos Shopify ─────────────────────────────────────────
-// Cada 5 min:
-//   - Si un pedido SHOPIFY lleva > 2h sin confirmar, le mandamos recordatorio.
-//   - Máximo 2 recordatorios por pedido (configurable via env).
-//   - Si después del último recordatorio pasan otras 2h sin confirmar →
-//     cancelamos el pedido automáticamente.
+// ─── Recordatorios de pedidos Shopify (por cuenta) ────────────────────────────
 
 const REMINDER_MAX      = Number(process.env.SHOPIFY_REMINDER_MAX ?? 2);
 const REMINDER_INTERVAL = Number(process.env.SHOPIFY_REMINDER_INTERVAL_SEC ?? 7200); // 2h
@@ -86,12 +99,8 @@ function buildReminderText(attemptNumber: number, customerFirstName: string | nu
     ? "Te recordamos que tu pedido aún está pendiente de confirmar."
     : "Es nuestro último recordatorio antes de cancelar tu pedido por falta de respuesta.";
   return [
-    greeting,
-    "",
-    urgency,
-    "",
-    `🧾 Pedido: ${orderNumber}`,
-    "",
+    greeting, "", urgency, "",
+    `🧾 Pedido: ${orderNumber}`, "",
     "Si todo está correcto responde *CONFIRMADO* para despachar tu pedido. Si deseas cambiar algo, escríbenos y te ayudamos de inmediato 💛"
   ].join("\n");
 }
@@ -99,102 +108,92 @@ function buildReminderText(attemptNumber: number, customerFirstName: string | nu
 function buildAutoCancelText(customerFirstName: string | null, orderNumber: string): string {
   const greeting = customerFirstName ? `Hola ${customerFirstName} 😊` : "Hola 😊";
   return [
-    greeting,
-    "",
-    `Cancelamos automáticamente tu pedido ${orderNumber} porque no recibimos confirmación.`,
-    "",
+    greeting, "",
+    `Cancelamos automáticamente tu pedido ${orderNumber} porque no recibimos confirmación.`, "",
     "Si todavía deseas recibirlo, escríbenos y lo reactivamos con gusto 💛"
   ].join("\n");
 }
 
 setInterval(() => {
-  const state = getConnectionState();
-  if (state.status !== "connected") return;
-  const currentOwner = state.phone ?? "";
+  // Para cada cuenta conectada, procesar SUS recordatorios (filtrados por su número).
+  for (const h of listHandles()) {
+    const conn = getAccountConnection(h.accountId);
+    if (conn.status !== "connected" || !conn.phone) continue;
+    const currentOwner = conn.phone;
 
-  // 1) Enviar recordatorios
-  for (const order of getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
-    try {
-      const attemptNumber = order.reminder_count + 1;
-      const orderNumberText = order.id ? `#${order.id}` : "";
-      const text = buildReminderText(attemptNumber, order.first_name, orderNumberText);
-
-      const reminderMsgId = insertMessage(order.conversation_id, "assistant", text);
-      enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, reminderMsgId);
-      incrementReminderCount(order.id);
-
-      insertOrderEvent({
-        orderId: order.id,
-        conversationId: order.conversation_id,
-        eventType: "CONFIRMATION_RESENT_TO_CLIENT",
-        message: `Recordatorio ${attemptNumber}/${REMINDER_MAX} enviado`,
-        metadata: { attemptNumber, maxAttempts: REMINDER_MAX }
-      });
-      console.log(`[bot] ⏰ Recordatorio ${attemptNumber}/${REMINDER_MAX} → order #${order.id} (${order.conv_phone})`);
-    } catch (err) {
-      console.error(`[bot] Error enviando recordatorio order #${order.id}:`, err);
+    for (const order of getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
+      try {
+        const attemptNumber = order.reminder_count + 1;
+        const orderNumberText = order.id ? `#${order.id}` : "";
+        const text = buildReminderText(attemptNumber, order.first_name, orderNumberText);
+        const reminderMsgId = insertMessage(order.conversation_id, "assistant", text);
+        enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, reminderMsgId);
+        incrementReminderCount(order.id);
+        insertOrderEvent({
+          orderId: order.id,
+          conversationId: order.conversation_id,
+          eventType: "CONFIRMATION_RESENT_TO_CLIENT",
+          message: `Recordatorio ${attemptNumber}/${REMINDER_MAX} enviado`,
+          metadata: { attemptNumber, maxAttempts: REMINDER_MAX }
+        });
+      } catch (err) {
+        console.error(`[bot] Error enviando recordatorio order #${order.id}:`, err);
+      }
     }
-  }
 
-  // 2) Cancelar pedidos que ya agotaron recordatorios
-  for (const order of getOrdersToAutoCancel(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
-    try {
-      const orderNumberText = order.id ? `#${order.id}` : "";
-      const text = buildAutoCancelText(order.first_name, orderNumberText);
-
-      const cancelMsgId = insertMessage(order.conversation_id, "assistant", text);
-      enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, cancelMsgId);
-      setOrderStatus(order.id, "CANCELLED");
-
-      insertOrderEvent({
-        orderId: order.id,
-        conversationId: order.conversation_id,
-        eventType: "ORDER_CANCELLED",
-        message: "Auto-cancelado por falta de confirmación del cliente",
-        metadata: { reason: "no_confirmation_after_reminders", maxAttempts: REMINDER_MAX }
-      });
-      console.log(`[bot] ❌ Pedido #${order.id} cancelado automáticamente (sin confirmación)`);
-    } catch (err) {
-      console.error(`[bot] Error cancelando order #${order.id}:`, err);
+    for (const order of getOrdersToAutoCancel(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
+      try {
+        const orderNumberText = order.id ? `#${order.id}` : "";
+        const text = buildAutoCancelText(order.first_name, orderNumberText);
+        const cancelMsgId = insertMessage(order.conversation_id, "assistant", text);
+        enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, cancelMsgId);
+        setOrderStatus(order.id, "CANCELLED");
+        insertOrderEvent({
+          orderId: order.id,
+          conversationId: order.conversation_id,
+          eventType: "ORDER_CANCELLED",
+          message: "Auto-cancelado por falta de confirmación del cliente",
+          metadata: { reason: "no_confirmation_after_reminders", maxAttempts: REMINDER_MAX }
+        });
+      } catch (err) {
+        console.error(`[bot] Error cancelando order #${order.id}:`, err);
+      }
     }
   }
 }, REMINDER_CHECK_MS);
 
-// ─── Restart flag watcher ─────────────────────────────────────────────────────
+// ─── Watcher de reinicio por cuenta ───────────────────────────────────────────
+// La ruta /api/connection/disconnect escribe un flag ".restart-<accountId>" en
+// DATA_DIR. Aquí lo detectamos, desconectamos + limpiamos esa cuenta y la
+// volvemos a arrancar (para mostrar un QR nuevo).
 
 setInterval(async () => {
-  if (!fs.existsSync(RESTART_FLAG)) return;
+  let entries: string[] = [];
+  try { entries = fs.readdirSync(DATA_DIR); } catch { return; }
 
-  console.log("[bot] Flag de reinicio detectado. Reiniciando...");
+  for (const name of entries) {
+    if (!name.startsWith(".restart-")) continue;
+    const accountId = parseInt(name.slice(".restart-".length), 10);
+    try { fs.unlinkSync(path.join(DATA_DIR, name)); } catch {}
+    if (isNaN(accountId)) continue;
 
-  try { fs.unlinkSync(RESTART_FLAG); } catch {}
-
-  const handle = getHandle();
-  if (handle) {
-    try { await handle.shutdown(); } catch {}
+    console.log(`[bot] Flag de reinicio para cuenta ${accountId}. Reiniciando su conexión...`);
+    try { await stopAndWipe(accountId); } catch (err) { console.error(err); }
+    start(accountId).catch((e) => console.error(`[bot] Error reiniciando cuenta ${accountId}:`, e));
   }
-
-  try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch {}
-
-  await start();
 }, 1000);
 
-// ─── Capturar errores internos de Baileys (e.g. "Connection Closed" en retry) ─
+// ─── Errores internos de Baileys ──────────────────────────────────────────────
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[bot] Error no manejado, reconectando en 5s...", reason);
-  setTimeout(() => start().catch(console.error), 5000);
+  console.error("[bot] Error no manejado:", reason);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error("[bot] Excepción no capturada, reconectando en 5s...", err);
-  setTimeout(() => start().catch(console.error), 5000);
+  console.error("[bot] Excepción no capturada:", err);
 });
 
 // ─── Arranque principal ───────────────────────────────────────────────────────
 
-console.log("[bot] Iniciando agente WhatsApp...");
-start().catch((err) => {
-  console.error("[bot] Error fatal al iniciar:", err);
-  setTimeout(() => start().catch(console.error), 5000);
-});
+console.log("[bot] Iniciando agente WhatsApp (multi-cuenta)...");
+ensureAccountsConnected();

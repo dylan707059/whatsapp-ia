@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listLabels, createLabel, getConnectionState } from "@/lib/db";
+import { listLabels, createLabel } from "@/lib/db";
+import { ownerPhoneFromRequest } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,15 +8,13 @@ export const dynamic = "force-dynamic";
 const DEFAULT_COLOR = "#5e6ad2";
 const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
-export async function GET() {
-  const { phone } = getConnectionState();
-  const labels = listLabels(phone ?? "");
+export async function GET(req: NextRequest) {
+  const labels = listLabels(ownerPhoneFromRequest(req));
   return NextResponse.json({ labels });
 }
 
 export async function POST(req: NextRequest) {
-  const { phone } = getConnectionState();
-  const ownerPhone = phone ?? "";
+  const ownerPhone = ownerPhoneFromRequest(req);
 
   let body: { name?: string; color?: string };
   try { body = await req.json() as typeof body; }

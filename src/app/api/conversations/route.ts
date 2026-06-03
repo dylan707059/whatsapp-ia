@@ -3,16 +3,15 @@ import {
   listConversations,
   listArchivedConversations,
   countArchivedConversations,
-  getAllConversationLabels,
-  getConnectionState
+  getAllConversationLabels
 } from "@/lib/db";
+import { ownerPhoneFromRequest } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { phone } = getConnectionState();
-  const ownerPhone = phone ?? "";
+  const ownerPhone = ownerPhoneFromRequest(req);
 
   const archived = req.nextUrl.searchParams.get("archived") === "true";
 

@@ -8,7 +8,8 @@ import makeWASocket, {
 import type { WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcodeTerminal from "qrcode-terminal";
-import { setConnectionState, getConnectionState } from "../db";
+import path from "node:path";
+import { setAccountConnection, getAccountConnection, setAccountOwnerPhone } from "../db";
 import { setupMessageHandler } from "./handler";
 import { registerContact } from "./contact-store";
 import { getOwnerNotifyPhones } from "../owner-notifier";
@@ -16,57 +17,68 @@ import { AUTH_DIR } from "../paths";
 
 const logger = pino({ level: "silent" });
 
-// Cache en memoria de mensajes recientes para que getMessage funcione
+// Cache global de mensajes recientes (para getMessage). Las claves son ids de
+// WhatsApp, únicos entre cuentas, así que un solo cache sirve para todos.
 const msgCache = new Map<string, proto.IWebMessageInfo>();
 
 interface BaileysHandle {
   sock: WASocket;
+  accountId: number;
   shutdown: () => Promise<void>;
 }
 
-let handle: BaileysHandle | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let starting = false;
+// Un socket por cuenta. Multi-tenant: cada cuenta tiene su propia conexión,
+// su propia carpeta de credenciales (AUTH_DIR/<accountId>) y su propio QR.
+const handles         = new Map<number, BaileysHandle>();
+const reconnectTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const starting        = new Set<number>();
 
-function scheduleReconnect(code?: number) {
-  if (reconnectTimer) return;
+function authDirFor(accountId: number): string {
+  return path.join(AUTH_DIR, String(accountId));
+}
+
+function scheduleReconnect(accountId: number, code?: number) {
+  if (reconnectTimers.has(accountId)) return;
 
   const delay = code === 440 ? 15000 : code === undefined ? 10000 : 5000;
 
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-
-    if (handle) {
-      try {
-        handle.sock.end(undefined);
-      } catch {}
-      handle = null;
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(accountId);
+    const h = handles.get(accountId);
+    if (h) {
+      try { h.sock.end(undefined); } catch {}
+      handles.delete(accountId);
     }
-
-    start();
+    start(accountId);
   }, delay);
+
+  reconnectTimers.set(accountId, timer);
 }
 
-export async function start(): Promise<void> {
-  if (starting) return;
-  starting = true;
+/** True si la cuenta ya tiene socket vivo, arrancando o con reconexión pendiente. */
+export function isManaged(accountId: number): boolean {
+  return handles.has(accountId) || starting.has(accountId) || reconnectTimers.has(accountId);
+}
+
+export async function start(accountId: number): Promise<void> {
+  if (starting.has(accountId)) return;
+  starting.add(accountId);
   try {
-    await _start();
+    await _start(accountId);
   } finally {
-    starting = false;
+    starting.delete(accountId);
   }
 }
 
-async function _start(): Promise<void> {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+async function _start(accountId: number): Promise<void> {
+  const authDir = authDirFor(accountId);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   let version: [number, number, number] | undefined;
   try {
-    const fetched = await fetchLatestBaileysVersion();
-    version = fetched.version;
-    console.log(`[bot] Versión Baileys: ${version.join(".")}`);
+    version = (await fetchLatestBaileysVersion()).version;
   } catch (err) {
-    console.warn("[bot] No se pudo obtener última versión:", err);
+    console.warn(`[bot] (acc ${accountId}) No se pudo obtener última versión:`, err);
   }
 
   const sock = makeWASocket({
@@ -76,9 +88,8 @@ async function _start(): Promise<void> {
     browser: Browsers.macOS("Desktop"),
     markOnlineOnConnect: true,
     syncFullHistory: false,
-    connectTimeoutMs: 60_000,      // 60s para escanear antes de regenerar QR
-    retryRequestDelayMs: 5_000,    // 5s entre reintentos internos
-    // Requerido en v6.7+ para que el procesamiento de mensajes no se bloquee
+    connectTimeoutMs: 60_000,
+    retryRequestDelayMs: 5_000,
     getMessage: async (key) => {
       const id = key.id ?? "";
       const cached = msgCache.get(id);
@@ -87,43 +98,28 @@ async function _start(): Promise<void> {
     }
   });
 
-  handle = {
+  handles.set(accountId, {
     sock,
-    shutdown: async () => {
-      try {
-        sock.end(undefined);
-      } catch {}
-    }
-  };
+    accountId,
+    shutdown: async () => { try { sock.end(undefined); } catch {} }
+  });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // Llenar mapa LID → teléfono para resolver owners que llegan como @lid
   sock.ev.on("contacts.upsert", (contacts) => {
-    console.log(`[contact-store] contacts.upsert: ${contacts.length} contactos`);
-    for (const c of contacts) {
-      const lid = (c as { lid?: string }).lid;
-      if (lid) console.log(`[contact-store] LID encontrado: ${lid} → ${c.id}`);
-      registerContact(c.id, lid);
-    }
+    for (const c of contacts) registerContact(c.id, (c as { lid?: string }).lid);
   });
   sock.ev.on("contacts.update", (contacts) => {
-    for (const c of contacts) {
-      const lid = (c as { lid?: string }).lid;
-      if (lid) console.log(`[contact-store] LID actualizado: ${lid} → ${c.id}`);
-      registerContact(c.id, lid);
-    }
+    for (const c of contacts) registerContact(c.id, (c as { lid?: string }).lid);
   });
 
-  // Cachear mensajes entrantes para getMessage
   sock.ev.on("messages.upsert", ({ messages }) => {
     for (const msg of messages) {
       if (msg.key?.id) {
         msgCache.set(msg.key.id, msg);
-        // Limitar el tamaño del caché
-        if (msgCache.size > 100) {
+        while (msgCache.size > 200) {
           const first = msgCache.keys().next().value;
-          if (first) msgCache.delete(first);
+          if (first) msgCache.delete(first); else break;
         }
       }
     }
@@ -133,40 +129,31 @@ async function _start(): Promise<void> {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("[bot] QR generado, guardando en DB...");
-      setConnectionState({ status: "qr", qr_string: qr, phone: null });
+      setAccountConnection(accountId, { status: "qr", qr_string: qr, phone: null });
       qrcodeTerminal.generate(qr, { small: true });
     }
 
     if (connection === "connecting") {
-      const current = getConnectionState();
+      const current = getAccountConnection(accountId);
       if (current.status === "disconnected") {
-        setConnectionState({ status: "connecting" });
+        setAccountConnection(accountId, { status: "connecting" });
       }
     }
 
     if (connection === "open") {
-      const rawId = sock.user?.id ?? "";
-      const phone = rawId.split(":")[0];
-      console.log(`[bot] Conectado como ${phone}`);
-      setConnectionState({ status: "connected", qr_string: null, phone });
+      const phone = (sock.user?.id ?? "").split(":")[0];
+      console.log(`[bot] (acc ${accountId}) Conectado como ${phone}`);
+      setAccountConnection(accountId, { status: "connected", qr_string: null, phone });
+      setAccountOwnerPhone(accountId, phone);
 
-      // Pre-registrar LID de cada owner para resolver @lid JIDs
-      const ownerPhones = getOwnerNotifyPhones();
-      for (const ownerPhone of ownerPhones) {
+      // Pre-registrar LIDs de owners para resolver @lid JIDs
+      for (const ownerPhone of getOwnerNotifyPhones()) {
         try {
           const results = await sock.onWhatsApp(ownerPhone);
-          if (results && results.length > 0) {
-            const info = results[0] as { jid: string; lid?: string; exists: boolean };
-            if (info.exists && info.lid) {
-              registerContact(info.jid, info.lid);
-              console.log(`[contact-store] Owner pre-registrado: ${ownerPhone} → LID ${info.lid}`);
-            } else {
-              console.log(`[contact-store] Owner ${ownerPhone}: sin LID en respuesta`);
-            }
-          }
+          const info = results?.[0] as { jid: string; lid?: string; exists: boolean } | undefined;
+          if (info?.exists && info.lid) registerContact(info.jid, info.lid);
         } catch (err) {
-          console.error(`[contact-store] Error consultando LID de ${ownerPhone}:`, err);
+          console.error(`[bot] (acc ${accountId}) Error consultando LID de ${ownerPhone}:`, err);
         }
       }
     }
@@ -174,32 +161,44 @@ async function _start(): Promise<void> {
     if (connection === "close") {
       const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })
         ?.output?.statusCode;
+      console.log(`[bot] (acc ${accountId}) Conexión cerrada. Código: ${statusCode}`);
 
-      console.log(`[bot] Conexión cerrada. Código: ${statusCode}`);
-
-      if (
-        statusCode === DisconnectReason.loggedOut ||
-        statusCode === 401
-      ) {
-        console.log("[bot] Sesión expirada (401). Limpiando credenciales y regenerando QR...");
-        setConnectionState({ status: "disconnected", qr_string: null, phone: null });
-
-        // Borrar auth y reconectar para mostrar QR nuevo
+      if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+        console.log(`[bot] (acc ${accountId}) Sesión expirada. Limpiando credenciales y regenerando QR...`);
+        setAccountConnection(accountId, { status: "disconnected", qr_string: null, phone: null });
         const { rmSync } = await import("node:fs");
-        const { AUTH_DIR: dir } = await import("../paths");
-        try { rmSync(dir, { recursive: true, force: true }); } catch {}
-
-        scheduleReconnect();
+        try { rmSync(authDir, { recursive: true, force: true }); } catch {}
+        scheduleReconnect(accountId);
         return;
       }
 
-      scheduleReconnect(statusCode);
+      scheduleReconnect(accountId, statusCode);
     }
   });
 
   setupMessageHandler(sock);
 }
 
-export function getHandle(): BaileysHandle | null {
-  return handle;
+export function getHandle(accountId: number): BaileysHandle | undefined {
+  return handles.get(accountId);
+}
+
+export function listHandles(): BaileysHandle[] {
+  return [...handles.values()];
+}
+
+/** Desconecta una cuenta, borra sus credenciales y deja su estado en disconnected. */
+export async function stopAndWipe(accountId: number): Promise<void> {
+  const h = handles.get(accountId);
+  if (h) {
+    try { await h.shutdown(); } catch {}
+    handles.delete(accountId);
+  }
+  const timer = reconnectTimers.get(accountId);
+  if (timer) { clearTimeout(timer); reconnectTimers.delete(accountId); }
+
+  const { rmSync } = await import("node:fs");
+  try { rmSync(authDirFor(accountId), { recursive: true, force: true }); } catch {}
+
+  setAccountConnection(accountId, { status: "disconnected", qr_string: null, phone: null });
 }

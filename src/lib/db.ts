@@ -945,6 +945,20 @@ export function getActiveAccountSettings(): AccountSettings | undefined {
   }
 }
 
+const stmtSettingsByDomain = db.prepare<[string], AccountSettings>(
+  "SELECT * FROM account_settings WHERE lower(shopify_domain) = lower(?) AND configured = 1 LIMIT 1"
+);
+
+/** Resuelve la cuenta dueña de un webhook por el dominio de su tienda Shopify. */
+export function getAccountSettingsByShopDomain(domain: string): AccountSettings | undefined {
+  if (!domain.trim()) return undefined;
+  try {
+    return stmtSettingsByDomain.get(domain.trim());
+  } catch {
+    return undefined;
+  }
+}
+
 // ─── Conexión de WhatsApp por cuenta (multi-tenant) ───────────────────────────
 export interface AccountConnection {
   account_id: number;
@@ -1018,19 +1032,42 @@ export function getAccountByOwnerPhone(phone: string): Account | undefined {
 // cuenta en Render sin exponer la contraseña en el código — basta con definir
 // SEED_ACCOUNT_EMAIL y SEED_ACCOUNT_PASSWORD en el panel de Render una vez.
 // El email tiene un valor por defecto para reducir fricción.
-if (process.env.NEXT_PHASE !== "phase-production-build" && process.env.SEED_ACCOUNT_PASSWORD) {
+function seedAccountFromEnv(
+  emailVar: string,
+  passVar: string,
+  bizVar: string,
+  phoneVar: string,
+  defaultEmail?: string
+): void {
+  const password = process.env[passVar];
+  if (!password) return;
+  const email = (process.env[emailVar] || defaultEmail || "").toLowerCase().trim();
+  if (!email) return;
+  if (getAccountByEmail(email)) return;
+  createAccount(
+    email,
+    hashPassword(password),
+    process.env[bizVar] || null,
+    process.env[phoneVar] || null
+  );
+  console.log(`[auth] Cuenta creada por seed: ${email}`);
+}
+
+if (process.env.NEXT_PHASE !== "phase-production-build") {
   try {
-    const seedEmail = (process.env.SEED_ACCOUNT_EMAIL || "dylangofo1@gmail.com").toLowerCase().trim();
-    if (!getAccountByEmail(seedEmail)) {
-      createAccount(
-        seedEmail,
-        hashPassword(process.env.SEED_ACCOUNT_PASSWORD),
-        process.env.SEED_ACCOUNT_BUSINESS || "Eclipse",
-        process.env.SEED_ACCOUNT_OWNER_PHONE || null
-      );
-      console.log(`[auth] Cuenta inicial creada: ${seedEmail}`);
-    }
+    // Cuenta principal (email con valor por defecto para reducir fricción)
+    seedAccountFromEnv(
+      "SEED_ACCOUNT_EMAIL", "SEED_ACCOUNT_PASSWORD",
+      "SEED_ACCOUNT_BUSINESS", "SEED_ACCOUNT_OWNER_PHONE",
+      "dylangofo1@gmail.com"
+    );
+    // Cuenta secundaria opcional (para pruebas): define SEED_ACCOUNT2_EMAIL +
+    // SEED_ACCOUNT2_PASSWORD en el entorno y se crea sola.
+    seedAccountFromEnv(
+      "SEED_ACCOUNT2_EMAIL", "SEED_ACCOUNT2_PASSWORD",
+      "SEED_ACCOUNT2_BUSINESS", "SEED_ACCOUNT2_OWNER_PHONE"
+    );
   } catch (err) {
-    console.error("[auth] Error en auto-seed de cuenta:", err);
+    console.error("[auth] Error en auto-seed de cuentas:", err);
   }
 }

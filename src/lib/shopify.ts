@@ -148,18 +148,88 @@ export function parseShopifyOrder(payload: ShopifyOrderPayload): ParsedShopifyOr
   };
 }
 
+// ─── Parsing de variantes de Shopify ──────────────────────────────────────────
+// Reglas según convención de Eclipse:
+//   - 2 partes "Color / Talla"        → ropa común (S, M, L, XL)
+//   - 3 partes "Color / Top / Pant"   → SET de 3 piezas:
+//       - Top   = letra (S, M, L, XL) — talla del body/top
+//       - Pant  = número (4, 6, 8, 10, 12, 14) — talla del pantalón
+//   - Si la 3era parte NO es numérica, se concatena con la 2da por seguridad
+
+export interface ParsedVariant {
+  color: string;
+  topSize: string;    // talla superior (M, L, etc.) o única si no es set
+  pantSize: string;   // talla pantalón si es set, "" sino
+  isSet: boolean;     // true si tiene 3 partes y la 3era es numérica
+  rawDisplay: string; // representación legible para el campo `size` de OrderData
+}
+
+const NUMERIC_PANT_SIZE = /^\d{1,2}$/;
+
+export function parseVariantTitle(variantTitle: string | null | undefined): ParsedVariant {
+  const parts = (variantTitle || "")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 3) {
+    const color    = parts[0];
+    const topSize  = parts[1];
+    const pantSize = parts[2];
+    const isSet = NUMERIC_PANT_SIZE.test(pantSize);
+    if (isSet) {
+      return {
+        color,
+        topSize,
+        pantSize,
+        isSet: true,
+        rawDisplay: `Top ${topSize} · Pant ${pantSize}`
+      };
+    }
+    // 3+ partes pero la última no es número: la unimos por seguridad
+    return {
+      color,
+      topSize: parts.slice(1).join(" / "),
+      pantSize: "",
+      isSet: false,
+      rawDisplay: parts.slice(1).join(" / ")
+    };
+  }
+  if (parts.length === 2) {
+    return {
+      color: parts[0],
+      topSize: parts[1],
+      pantSize: "",
+      isSet: false,
+      rawDisplay: parts[1]
+    };
+  }
+  if (parts.length === 1) {
+    // Una sola parte: capaz es talla o capaz color, asumimos talla
+    return {
+      color: "",
+      topSize: parts[0],
+      pantSize: "",
+      isSet: false,
+      rawDisplay: parts[0]
+    };
+  }
+  return { color: "", topSize: "", pantSize: "", isSet: false, rawDisplay: "" };
+}
+
 // ─── Adapter a OrderData (formato interno del proyecto) ───────────────────────
 
 export function toOrderData(parsed: ParsedShopifyOrder, conversationId: number): OrderData {
   // Usamos el primer line item como producto principal.
   // Si hay varios, lo registramos así igual; el mensaje al cliente sí los lista todos.
   const first = parsed.items[0];
-  const variantParts = (first?.variantTitle ?? "").split("/").map(s => s.trim()).filter(Boolean);
+  const variant = parseVariantTitle(first?.variantTitle);
+
   // validateOrderData requiere color y size no vacíos para notificar al owner.
   // Si el producto no tiene variantes, usamos "—" como placeholder en vez de
   // dejar vacío (lo cual bloquearía la notificación).
-  const color = variantParts[0] ?? "—";
-  const size  = variantParts[1] ?? "—";
+  const color = variant.color || "—";
+  const size  = variant.rawDisplay || "—";
 
   return {
     conversationId,
@@ -246,21 +316,24 @@ export function buildConfirmationMessage(parsed: ParsedShopifyOrder): string {
 
   const itemsBlock = parsed.items
     .map((it, idx) => {
-      const variantParts = (it.variantTitle ?? "")
-        .split("/")
-        .map(s => s.trim())
-        .filter(Boolean);
-      const color = variantParts[0] ?? "";
-      const size  = variantParts[1] ?? "";
+      const variant = parseVariantTitle(it.variantTitle);
 
-      const lines = [
+      const lines: (string | null)[] = [
         `🛍️ Producto ${idx + 1}: ${it.title}`,
-        color ? `🎨 Color: ${color}` : null,
-        size  ? `📏 Talla: ${size}` : null,
-        `🔢 Cantidad: ${it.quantity} unidad${it.quantity === 1 ? "" : "es"}`
-      ].filter(Boolean);
+        variant.color ? `🎨 Color: ${variant.color}` : null
+      ];
 
-      return lines.join("\n");
+      if (variant.isSet) {
+        // Set de 3 piezas → mostrar AMBAS tallas separadas
+        lines.push(`📏 Talla body/top: ${variant.topSize}`);
+        lines.push(`📐 Talla pantalón: ${variant.pantSize}`);
+      } else if (variant.topSize) {
+        lines.push(`📏 Talla: ${variant.topSize}`);
+      }
+
+      lines.push(`🔢 Cantidad: ${it.quantity} unidad${it.quantity === 1 ? "" : "es"}`);
+
+      return lines.filter(Boolean).join("\n");
     })
     .join("\n\n");
 

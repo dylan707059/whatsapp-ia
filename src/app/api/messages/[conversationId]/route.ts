@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
   // Solo mensajes humanos desde el dashboard
   const messageId = insertMessage(id, "human", body.content.trim());
-  enqueueOutbox(id, conv.phone, body.content.trim());
+  enqueueOutbox(id, conv.phone, body.content.trim(), 0, messageId);
 
   return NextResponse.json({ ok: true, messageId });
 }

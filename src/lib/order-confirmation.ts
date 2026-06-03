@@ -70,25 +70,42 @@ function normalize(text: string): string {
     .trim();
 }
 
+// Palabras "positivas" sueltas que cuentan como confirmación dentro de
+// mensajes cortos (≤ 8 palabras). Ej: "si claro gracias", "ok mami",
+// "listo dale", "perfecto entonces", "esta bien si".
+// Solo aplica cuando NO hay patrones negativos (cambiar, cancelar, mal, etc.)
+const POSITIVE_KEYWORDS = [
+  "confirmado", "confirmo", "confirmar",
+  "perfecto", "perfecta", "excelente", "genial", "buenisimo", "buenisima",
+  "listo", "lista", "correcto", "correcta", "exacto", "exacta",
+  "vale", "dale", "claro", "bueno", "buena",
+  "ok", "okay", "okey", "okas", "oka",
+  "si",                // Cuidado: solo dispara en mensajes <= 8 palabras
+  "yes", "sip", "sipo",
+  "envien", "envialo", "manden", "mandalo", "despachen", "despachalo"
+];
+
+const POSITIVE_RE = new RegExp(`\\b(${POSITIVE_KEYWORDS.join("|")})\\b`);
+
 /**
  * Devuelve true si el texto se interpreta como confirmación final de pedido.
  *
- * Tres pasos:
- *   1. Si matchea una expresión NEGATIVA (cancelar, cambiar, no es correcto)
- *      → false, sin importar si también hay keyword positivo.
- *   2. Si el mensaje normalizado matchea EXACT con una frase corta de la lista
- *      → true.
- *   3. Si el mensaje matchea cualquiera de los PATTERNS regex → true.
+ * Capas (cortocircuito en orden):
+ *   1. NEGATIVE_PATTERNS → false (cancelar, cambiar, mal, no esta correcto, etc.)
+ *   2. CONFIRMATION_EXACT → true (frase entera matchea)
+ *   3. CONFIRMATION_PATTERNS → true (regex compuesto dentro del texto)
+ *   4. Heurística suelta: mensaje corto (≤ 8 palabras) que contiene ALGUNA
+ *      palabra positiva (si, ok, vale, perfecto, listo, claro, etc.) → true
  *
- * "sí" solo, "perfecto" solo, etc. SÍ activan ahora porque la gente
- * confirma así. Si esto causa falsos positivos, ajustar removiendo keywords
- * del set EXACT.
+ * La capa 4 es la más permisiva pero requiere que el mensaje sea CORTO
+ * (≤ 8 palabras) para no tomar como confirmación frases largas tipo
+ * "perfecto, pero antes quiero cambiar el color".
  */
 export function isConfirmationMessage(text: string): boolean {
   const norm = normalize(text);
   if (!norm) return false;
 
-  // 1) Bloqueo por intención negativa explícita
+  // 1) Bloqueo por intención negativa explícita (siempre)
   for (const neg of NEGATIVE_PATTERNS) {
     if (neg.test(norm)) return false;
   }
@@ -99,6 +116,12 @@ export function isConfirmationMessage(text: string): boolean {
   // 3) Match por patrón dentro de mensaje más largo
   for (const re of CONFIRMATION_PATTERNS) {
     if (re.test(norm)) return true;
+  }
+
+  // 4) Heurística suelta para mensajes cortos con keyword positivo
+  const words = norm.split(/\s+/);
+  if (words.length <= 8 && POSITIVE_RE.test(norm)) {
+    return true;
   }
 
   return false;

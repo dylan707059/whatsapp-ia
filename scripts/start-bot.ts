@@ -3,7 +3,11 @@ import "./env-loader";
 import fs from "node:fs";
 import path from "node:path";
 import { start, getHandle } from "../src/lib/baileys/client";
-import { getPendingOutbox, claimOutboxItem, getConnectionState, enqueueOutbox, insertMessage } from "../src/lib/db";
+import {
+  getPendingOutbox, claimOutboxItem, getConnectionState, enqueueOutbox, insertMessage,
+  setMessageWaId,
+  getPendingRevokes, markRevokeDone
+} from "../src/lib/db";
 import {
   getOrdersNeedingReminder,
   getOrdersToAutoCancel,
@@ -27,18 +31,38 @@ setInterval(async () => {
   if (getConnectionState().status !== "connected") return;
 
   for (const item of getPendingOutbox(20)) {
-    // CLAIM atómico: si otro tick ya lo procesó o si el item ya fue enviado
-    // (por ejemplo después de un restart que dejó la fila inconsistente),
-    // skip. Esto da semántica AT-MOST-ONCE: preferimos perder ocasionalmente
-    // un mensaje a spamear al cliente con duplicados.
-    if (!claimOutboxItem(item.id)) {
-      continue;
-    }
+    if (!claimOutboxItem(item.id)) continue;
     try {
-      await handle.sock.sendMessage(item.phone, { text: item.content });
+      const result = await handle.sock.sendMessage(item.phone, { text: item.content });
       console.log(`[bot] → Outbox enviado a ${item.phone}`);
+
+      // Guardar el wa_msg_id en la fila de messages asociada para poder
+      // revocar el mensaje más tarde si el owner lo borra "para todos".
+      const waMsgId = result?.key?.id;
+      if (waMsgId && item.message_id) {
+        try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
+      }
     } catch (err) {
       console.error(`[bot] Error enviando outbox #${item.id} (NO se reintenta):`, err);
+    }
+  }
+
+  // Procesar revokes pendientes (delete para todos)
+  for (const r of getPendingRevokes(10)) {
+    try {
+      await handle.sock.sendMessage(r.remote_jid, {
+        delete: {
+          remoteJid: r.remote_jid,
+          fromMe:    r.wa_from_me === 1,
+          id:        r.wa_msg_id
+        }
+      });
+      markRevokeDone(r.id);
+      console.log(`[bot] 🗑 Mensaje ${r.wa_msg_id} revocado en ${r.remote_jid}`);
+    } catch (err) {
+      console.error(`[bot] Error revocando ${r.wa_msg_id}:`, err);
+      // Marca igual para no quedar atascado — WhatsApp tiene ventana ~1h
+      markRevokeDone(r.id);
     }
   }
 }, 2000);
@@ -91,8 +115,8 @@ setInterval(() => {
       const orderNumberText = order.id ? `#${order.id}` : "";
       const text = buildReminderText(attemptNumber, order.first_name, orderNumberText);
 
-      insertMessage(order.conversation_id, "assistant", text);
-      enqueueOutbox(order.conversation_id, order.conv_phone, text);
+      const reminderMsgId = insertMessage(order.conversation_id, "assistant", text);
+      enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, reminderMsgId);
       incrementReminderCount(order.id);
 
       insertOrderEvent({
@@ -114,8 +138,8 @@ setInterval(() => {
       const orderNumberText = order.id ? `#${order.id}` : "";
       const text = buildAutoCancelText(order.first_name, orderNumberText);
 
-      insertMessage(order.conversation_id, "assistant", text);
-      enqueueOutbox(order.conversation_id, order.conv_phone, text);
+      const cancelMsgId = insertMessage(order.conversation_id, "assistant", text);
+      enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, cancelMsgId);
       setOrderStatus(order.id, "CANCELLED");
 
       insertOrderEvent({

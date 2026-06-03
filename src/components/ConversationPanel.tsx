@@ -253,9 +253,18 @@ export default function ConversationPanel({
         {messages.map((msg) => (
           <MessageBubble
             key={msg.id}
+            messageId={msg.id}
             role={msg.role}
             content={msg.content}
             createdAt={msg.created_at}
+            canDeleteForEveryone={msg.wa_from_me === 1 && !!msg.wa_msg_id}
+            onDelete={async (mode) => {
+              if (msg.id < 0) return; // optimistic, ignorar
+              try {
+                await fetch(`/api/messages/item/${msg.id}?for=${mode}`, { method: "DELETE" });
+                setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+              } catch (err) { console.error(err); }
+            }}
           />
         ))}
         <div ref={bottomRef} />

@@ -104,8 +104,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
-    insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt);
+    const rejMsgId = insertMessage(conv.id, "assistant", rejectionText);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, rejMsgId);
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por zona no cubierta (${zoneLabel}) — ` +
@@ -147,8 +147,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
-    insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt);
+    const ofcMsgId = insertMessage(conv.id, "assistant", rejectionText);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, ofcMsgId);
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por dirección de oficina ` +
@@ -223,8 +223,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // encolar (para que aparezca en el dashboard) y dejamos outbox como cola de
   // envío real. El outbox respeta scheduled_at — solo dispara cuando llega
   // el momento, o cuando el handler entrante lo adelanta.
-  insertMessage(conv.id, "assistant", message);
-  enqueueOutbox(conv.id, conv.phone, message, scheduledAt);
+  const confMsgId = insertMessage(conv.id, "assistant", message);
+  enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId);
 
   console.log(
     `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +

@@ -95,8 +95,22 @@ db.exec(`
     conversation_id INTEGER NOT NULL REFERENCES conversations(id),
     role            TEXT CHECK(role IN ('user','assistant','human')) NOT NULL,
     content         TEXT NOT NULL,
+    created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+    wa_msg_id       TEXT,
+    wa_from_me      INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS revoke_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    remote_jid      TEXT NOT NULL,
+    wa_msg_id       TEXT NOT NULL,
+    wa_from_me      INTEGER NOT NULL DEFAULT 1,
+    processed       INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
+
+  CREATE INDEX IF NOT EXISTS idx_revoke_pending ON revoke_queue(processed, created_at);
 
   CREATE INDEX IF NOT EXISTS idx_messages_conv
     ON messages(conversation_id, created_at);
@@ -119,6 +133,7 @@ db.exec(`
     content         TEXT NOT NULL,
     sent            INTEGER NOT NULL DEFAULT 0,
     scheduled_at    INTEGER NOT NULL DEFAULT 0,
+    message_id      INTEGER,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -238,6 +253,15 @@ db.exec(`
   if (!cols.includes("scheduled_at")) {
     db.exec("ALTER TABLE outbox ADD COLUMN scheduled_at INTEGER NOT NULL DEFAULT 0");
   }
+  if (!cols.includes("message_id")) {
+    db.exec("ALTER TABLE outbox ADD COLUMN message_id INTEGER");
+  }
+}
+{
+  const cols = (db.prepare("PRAGMA table_info(messages)").all() as { name: string }[])
+    .map(c => c.name);
+  if (!cols.includes("wa_msg_id"))  db.exec("ALTER TABLE messages ADD COLUMN wa_msg_id TEXT");
+  if (!cols.includes("wa_from_me")) db.exec("ALTER TABLE messages ADD COLUMN wa_from_me INTEGER NOT NULL DEFAULT 0");
 }
 
 // ─── 3. Exportar instancia ────────────────────────────────────────────────────
@@ -384,8 +408,8 @@ export function setConnectionState(patch: {
 }
 
 // Outbox
-const stmtEnqueue = db.prepare<[number, string, string, number]>(
-  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at) VALUES (?, ?, ?, ?)"
+const stmtEnqueue = db.prepare<[number, string, string, number, number | null]>(
+  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at, message_id) VALUES (?, ?, ?, ?, ?)"
 );
 const stmtPendingOutbox = db.prepare<[number], OutboxItem>(
   "SELECT * FROM outbox WHERE sent = 0 AND scheduled_at <= unixepoch() ORDER BY created_at ASC LIMIT ?"
@@ -417,18 +441,16 @@ export function enqueueOutbox(
   conversationId: number,
   phone: string,
   content: string,
-  scheduledAt = 0
+  scheduledAt = 0,
+  messageId: number | null = null
 ): boolean {
   // Dedup: si en las últimas 24h ya pusimos exactamente este content en
-  // outbox para la misma conv, NO encolamos otra vez. Ventana ancha porque
-  // confirmaciones idénticas no deberían reenviarse JAMÁS dentro del día.
-  // Los recordatorios usan content distinto a la confirmación, así que no
-  // colisionan.
+  // outbox para la misma conv, NO encolamos otra vez.
   const since = Math.floor(Date.now() / 1000) - 86_400;
   const existing = stmtFindRecentOutbox.get(conversationId, content, since);
   if (existing) return false;
 
-  stmtEnqueue.run(conversationId, phone, content, scheduledAt);
+  stmtEnqueue.run(conversationId, phone, content, scheduledAt, messageId);
   return true;
 }
 
@@ -458,6 +480,89 @@ export function claimOutboxItem(id: number): boolean {
 export function advancePendingOutbox(conversationId: number): number {
   const result = stmtAdvancePending.run(conversationId);
   return result.changes;
+}
+
+// ─── Mensajes: helpers WhatsApp ID + borrado ─────────────────────────────────
+const stmtGetMessageById = db.prepare<[number], {
+  id: number; conversation_id: number; role: string; content: string;
+  created_at: number; wa_msg_id: string | null; wa_from_me: number;
+}>("SELECT * FROM messages WHERE id = ?");
+
+const stmtSetMessageWaId = db.prepare<[string, number, number]>(
+  "UPDATE messages SET wa_msg_id = ?, wa_from_me = ? WHERE id = ?"
+);
+
+const stmtInsertMessageWithWa = db.prepare<[number, string, string, string | null, number]>(
+  "INSERT INTO messages (conversation_id, role, content, wa_msg_id, wa_from_me) VALUES (?, ?, ?, ?, ?)"
+);
+
+const stmtDeleteMessageById = db.prepare<[number]>(
+  "DELETE FROM messages WHERE id = ?"
+);
+
+export function getMessageById(id: number): {
+  id: number; conversation_id: number; role: string; content: string;
+  created_at: number; wa_msg_id: string | null; wa_from_me: number;
+} | undefined {
+  return stmtGetMessageById.get(id);
+}
+
+export function setMessageWaId(messageId: number, waMsgId: string, fromMe: boolean): void {
+  stmtSetMessageWaId.run(waMsgId, fromMe ? 1 : 0, messageId);
+}
+
+const insertMessageWithWaTx = db.transaction(
+  (conversationId: number, role: string, content: string, waMsgId: string | null, fromMe: boolean): number => {
+    const info = stmtInsertMessageWithWa.run(conversationId, role, content, waMsgId, fromMe ? 1 : 0);
+    stmtUpdateLastMsg.run(conversationId);
+    return info.lastInsertRowid as number;
+  }
+);
+
+/** Inserta mensaje con metadatos de WhatsApp (para que sea revocable). */
+export function insertMessageFull(
+  conversationId: number,
+  role: MessageRole,
+  content: string,
+  waMsgId: string | null,
+  fromMe: boolean
+): number {
+  return insertMessageWithWaTx(conversationId, role, content, waMsgId, fromMe);
+}
+
+/** Borra el mensaje SOLO de la DB local ("para mí"). */
+export function deleteMessageLocal(messageId: number): void {
+  stmtDeleteMessageById.run(messageId);
+}
+
+// ─── Cola de revokes (delete para todos via Baileys) ─────────────────────────
+const stmtEnqueueRevoke = db.prepare<[number, string, string, number]>(
+  "INSERT INTO revoke_queue (conversation_id, remote_jid, wa_msg_id, wa_from_me) VALUES (?, ?, ?, ?)"
+);
+const stmtPendingRevokes = db.prepare<[number], {
+  id: number; conversation_id: number; remote_jid: string;
+  wa_msg_id: string; wa_from_me: number; created_at: number;
+}>("SELECT id, conversation_id, remote_jid, wa_msg_id, wa_from_me, created_at FROM revoke_queue WHERE processed = 0 ORDER BY created_at ASC LIMIT ?");
+const stmtMarkRevokeDone = db.prepare<[number]>(
+  "UPDATE revoke_queue SET processed = 1 WHERE id = ?"
+);
+
+export function enqueueRevoke(conversationId: number, remoteJid: string, waMsgId: string, fromMe: boolean): void {
+  stmtEnqueueRevoke.run(conversationId, remoteJid, waMsgId, fromMe ? 1 : 0);
+}
+export interface PendingRevoke {
+  id: number;
+  conversation_id: number;
+  remote_jid: string;
+  wa_msg_id: string;
+  wa_from_me: number;
+  created_at: number;
+}
+export function getPendingRevokes(limit = 20): PendingRevoke[] {
+  return stmtPendingRevokes.all(limit);
+}
+export function markRevokeDone(id: number): void {
+  stmtMarkRevokeDone.run(id);
 }
 
 // Buscar conversación reciente con orden SHOPIFY pendiente y matching de nombre

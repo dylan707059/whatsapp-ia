@@ -45,6 +45,8 @@ export interface Message {
   role: MessageRole;
   content: string;
   created_at: number;
+  wa_msg_id?: string | null;
+  wa_from_me?: number;
 }
 
 export interface ConnectionState {
@@ -62,6 +64,7 @@ export interface OutboxItem {
   content: string;
   sent: number;
   scheduled_at: number;
+  message_id: number | null;
   created_at: number;
 }
 

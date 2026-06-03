@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
-import DashboardHeader from "./DashboardHeader";
+import Sidebar, { type View } from "./Sidebar";
 import ConversationList from "./ConversationList";
 import ConversationPanel from "./ConversationPanel";
 
@@ -14,10 +14,12 @@ export default function ConnectionGate() {
   const [connectedPhone, setConnected]    = useState<string>("");
   const [conversations, setConversations] = useState<ConversationWithPreview[]>([]);
   const [archivedCount, setArchivedCount] = useState<number>(0);
-  const [showArchived, setShowArchived]   = useState<boolean>(false);
+  const [view, setView]                   = useState<View>("active");
   const [selectedId, setSelectedId]       = useState<number | null>(null);
+  const [search, setSearch]               = useState<string>("");
+  const [labelFilter, setLabelFilter]     = useState<number | null>(null);
 
-  // Polling de estado: mientras no esté conectado verifica cada 2s
+  // Polling estado de conexión
   useEffect(() => {
     checkStatus();
     const timer = setInterval(() => {
@@ -27,14 +29,14 @@ export default function ConnectionGate() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appStatus]);
 
-  // Polling de conversaciones cuando está conectado
+  // Polling conversaciones
   useEffect(() => {
     if (appStatus !== "connected") return;
     fetchConversations();
-    const timer = setInterval(fetchConversations, 2000);
+    const timer = setInterval(fetchConversations, 2500);
     return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appStatus, showArchived]);
+  }, [appStatus, view]);
 
   async function checkStatus() {
     try {
@@ -53,7 +55,7 @@ export default function ConnectionGate() {
 
   async function fetchConversations() {
     try {
-      const url = showArchived
+      const url = view === "archived"
         ? "/api/conversations?archived=true"
         : "/api/conversations";
       const res = await fetch(url);
@@ -61,7 +63,6 @@ export default function ConnectionGate() {
       const data = await res.json() as {
         conversations: ConversationWithPreview[];
         archivedCount: number;
-        showingArchived: boolean;
       };
       setConversations(data.conversations);
       setArchivedCount(data.archivedCount);
@@ -73,7 +74,11 @@ export default function ConnectionGate() {
     setAppStatus("connected");
   }
 
-  function handleDisconnect() {
+  async function handleDisconnect() {
+    if (!confirm("¿Desconectar WhatsApp? Vas a tener que escanear el QR de nuevo.")) return;
+    try {
+      await fetch("/api/connection/disconnect", { method: "POST" });
+    } catch {}
     setConnected("");
     setSelectedId(null);
     setConversations([]);
@@ -93,10 +98,8 @@ export default function ConnectionGate() {
     try {
       const action = archived ? "unarchive" : "archive";
       await fetch(`/api/conversations/${id}/${action}`, { method: "POST" });
-      // Quitar de la lista actual (cambia de pestaña)
       setConversations((prev) => prev.filter((c) => c.id !== id));
       if (selectedId === id) setSelectedId(null);
-      // Refrescar contador
       fetchConversations();
     } catch (err) {
       console.error("Error toggling archive:", err);
@@ -112,17 +115,40 @@ export default function ConnectionGate() {
         if (error) alert(error);
         return;
       }
-      // Refrescar lista (cambia de orden)
       fetchConversations();
     } catch (err) {
       console.error("Error toggling pin:", err);
     }
   }
 
+  // Filtros aplicados sobre las convs cargadas
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return conversations.filter((c) => {
+      if (labelFilter && !(c.labels ?? []).some((l) => l.id === labelFilter)) return false;
+      if (q) {
+        const inName = (c.name || "").toLowerCase().includes(q);
+        const inPhone = c.phone.toLowerCase().includes(q);
+        const inPreview = (c.last_message_preview || "").toLowerCase().includes(q);
+        if (!inName && !inPhone && !inPreview) return false;
+      }
+      return true;
+    });
+  }, [conversations, search, labelFilter]);
+
   if (appStatus === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+      <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--bg)" }}>
+        <div
+          style={{
+            width: 24, height: 24,
+            border: "2px solid var(--border-strong)",
+            borderTopColor: "var(--accent)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite"
+          }}
+        />
+        <style jsx>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -132,54 +158,77 @@ export default function ConnectionGate() {
   }
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
+  const pinnedCount = conversations.filter((c) => c.pinned_at).length;
 
   return (
-    <div className="flex flex-col h-screen">
-      <DashboardHeader phone={connectedPhone} onDisconnect={handleDisconnect} />
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "240px 320px 1fr",
+        height: "100vh",
+        background: "var(--bg)"
+      }}
+    >
+      <Sidebar
+        view={view}
+        onViewChange={(v) => { setView(v); setSelectedId(null); }}
+        activeCount={view === "active" ? conversations.length : 0}
+        archivedCount={archivedCount}
+        pinnedCount={pinnedCount}
+        ownerPhone={connectedPhone}
+        onDisconnect={handleDisconnect}
+        onLabelFilter={setLabelFilter}
+        activeLabelFilter={labelFilter}
+      />
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 flex flex-col border-r border-gray-200 bg-white">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              {showArchived ? "Archivados" : "Conversaciones"}
-            </h2>
-            <button
-              type="button"
-              onClick={() => { setSelectedId(null); setShowArchived((v) => !v); }}
-              className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
-                showArchived
-                  ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-              title={showArchived ? "Volver a activos" : "Ver archivados"}
-            >
-              {showArchived ? "← Activos" : `Archivados${archivedCount > 0 ? ` (${archivedCount})` : ""}`}
-            </button>
-          </div>
-          <ConversationList
-            conversations={conversations}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+      <ConversationList
+        conversations={filtered}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        search={search}
+        onSearch={setSearch}
+        viewLabel={view === "archived" ? "Archivados" : "Mensajes"}
+        totalCount={conversations.length}
+      />
+
+      <main style={{ background: "var(--bg)", overflow: "hidden" }}>
+        {selectedConversation ? (
+          <ConversationPanel
+            conversation={selectedConversation}
+            onModeChange={handleModeChange}
+            onDelete={handleDelete}
+            onArchiveToggle={handleArchiveToggle}
+            onPinToggle={handlePinToggle}
           />
-        </aside>
+        ) : (
+          <EmptyState />
+        )}
+      </main>
+    </div>
+  );
+}
 
-        <main className="flex-1 overflow-hidden">
-          {selectedConversation ? (
-            <ConversationPanel
-              conversation={selectedConversation}
-              onModeChange={handleModeChange}
-              onDelete={handleDelete}
-              onArchiveToggle={handleArchiveToggle}
-              onPinToggle={handlePinToggle}
-            />
-          ) : (
-            <div className="h-full flex items-center justify-center">
-              <p className="text-sm text-gray-400">
-                Selecciona una conversación para comenzar.
-              </p>
-            </div>
-          )}
-        </main>
+function EmptyState() {
+  return (
+    <div style={{ height: "100%", display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ textAlign: "center", maxWidth: 320 }}>
+        <div
+          style={{
+            width: 56, height: 56, borderRadius: 14,
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            display: "grid", placeItems: "center",
+            fontSize: 24, margin: "0 auto 16px"
+          }}
+        >
+          💬
+        </div>
+        <p style={{ color: "var(--text-muted)", fontSize: 14, margin: 0, lineHeight: 1.6 }}>
+          Seleccioná una conversación de la lista para ver los mensajes.
+        </p>
+        <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 8 }}>
+          Las nuevas conversaciones aparecen automáticamente.
+        </p>
       </div>
     </div>
   );

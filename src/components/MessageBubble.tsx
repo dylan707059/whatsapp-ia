@@ -15,25 +15,64 @@ export default function MessageBubble({ role, content, createdAt }: Props) {
   const isIncoming = role === "user";
 
   return (
-    <div className={`flex ${isIncoming ? "justify-start" : "justify-end"} mb-2`}>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: isIncoming ? "flex-start" : "flex-end",
+        marginBottom: 2
+      }}
+    >
       <div
-        className={`
-          max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed
-          ${isIncoming
-            ? "bg-white border border-gray-200 text-gray-800 rounded-bl-sm"
-            : role === "assistant"
-              ? "bg-emerald-500 text-white rounded-br-sm"
-              : "bg-amber-400 text-white rounded-br-sm"
-          }
-        `}
+        style={{
+          maxWidth: "58%",
+          padding: "8px 12px",
+          borderRadius: "var(--radius)",
+          fontSize: 13.5,
+          lineHeight: 1.5,
+          wordWrap: "break-word",
+          border: "1px solid var(--border)",
+          background: isIncoming ? "var(--bubble-in)" : "var(--bubble-out)",
+          color: "var(--text)"
+        }}
       >
-        <p className="whitespace-pre-wrap break-words">{content}</p>
-        <p className={`text-[10px] mt-1 ${isIncoming ? "text-gray-400" : "text-white/70"}`}>
-          {formatTime(createdAt)}
+        <div style={{ whiteSpace: "pre-wrap" }}>{content}</div>
+        <div
+          style={{
+            fontSize: 10.5,
+            color: "var(--text-dim)",
+            marginTop: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            justifyContent: isIncoming ? "flex-start" : "flex-end"
+          }}
+        >
           {role === "human" && (
-            <span className="ml-1 font-medium">(manual)</span>
+            <span
+              style={{
+                fontWeight: 600,
+                color: "var(--warning)",
+                fontSize: 9.5
+              }}
+              title="Mensaje enviado manualmente desde el dashboard"
+            >
+              MANUAL
+            </span>
           )}
-        </p>
+          {role === "assistant" && !isIncoming && (
+            <span
+              style={{
+                fontWeight: 600,
+                color: "var(--success)",
+                fontSize: 9.5
+              }}
+              title="Mensaje automático del bot"
+            >
+              AUTO
+            </span>
+          )}
+          <span>{formatTime(createdAt)}</span>
+        </div>
       </div>
     </div>
   );

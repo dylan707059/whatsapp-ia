@@ -9,20 +9,25 @@ interface Props {
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   DRAFT:                "Borrador",
-  PENDING_CONFIRMATION: "Esperando confirmación",
+  PENDING_CONFIRMATION: "Pendiente",
   CONFIRMED:            "Confirmado",
   OWNER_NOTIFIED:       "Notificado",
   DISPATCHED:           "Despachado",
   CANCELLED:            "Cancelado"
 };
 
-const STATUS_COLOR: Record<OrderStatus, string> = {
-  DRAFT:                "bg-gray-100 text-gray-600",
-  PENDING_CONFIRMATION: "bg-amber-100 text-amber-700",
-  CONFIRMED:            "bg-emerald-100 text-emerald-700",
-  OWNER_NOTIFIED:       "bg-blue-100 text-blue-700",
-  DISPATCHED:           "bg-purple-100 text-purple-700",
-  CANCELLED:            "bg-red-100 text-red-600"
+interface StatusStyle {
+  bg: string;
+  fg: string;
+}
+
+const STATUS_COLOR: Record<OrderStatus, StatusStyle> = {
+  DRAFT:                { bg: "var(--bg-elev-2)", fg: "var(--text-muted)" },
+  PENDING_CONFIRMATION: { bg: "var(--warning-soft)", fg: "var(--warning)" },
+  CONFIRMED:            { bg: "var(--success-soft)", fg: "var(--success)" },
+  OWNER_NOTIFIED:       { bg: "var(--accent-soft)", fg: "var(--accent)" },
+  DISPATCHED:           { bg: "rgba(167, 139, 250, 0.18)", fg: "#a78bfa" },
+  CANCELLED:            { bg: "var(--danger-soft)", fg: "var(--danger)" }
 };
 
 function missingFields(order: Order): string[] {
@@ -30,21 +35,16 @@ function missingFields(order: Order): string[] {
   if (!order.full_name) missing.push("nombre");
   if (!order.phone)     missing.push("teléfono");
   if (!order.product)   missing.push("producto");
-  if (!order.color)     missing.push("color");
-  if (!order.size)      missing.push("talla");
-  if (!order.quantity)  missing.push("cantidad");
-  if (!order.total)     missing.push("total");
   if (!order.address)   missing.push("dirección");
   if (!order.city)      missing.push("ciudad");
-  if (!order.department) missing.push("departamento");
   return missing;
 }
 
 function relativeTime(unix: number): string {
   const diff = Math.floor(Date.now() / 1000) - unix;
-  if (diff < 60)    return "hace un momento";
-  if (diff < 3600)  return `hace ${Math.floor(diff / 60)} min`;
-  if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
+  if (diff < 60)    return "ahora";
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return new Date(unix * 1000).toLocaleDateString("es");
 }
 
@@ -76,37 +76,77 @@ export default function OrderSummary({ conversationId }: Props) {
   if (!order && !isPaused) return null;
 
   return (
-    <div className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs space-y-1">
+    <div
+      style={{
+        margin: "12px 20px 4px",
+        padding: "10px 14px",
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+        fontSize: 12.5
+      }}
+    >
       {isPaused && (
-        <p className="text-amber-600 font-medium">
-          ⏸ IA pausada por intervención humana
-        </p>
+        <span
+          style={{
+            padding: "2px 8px",
+            borderRadius: 3,
+            fontSize: 10.5,
+            fontWeight: 600,
+            background: "var(--warning-soft)",
+            color: "var(--warning)"
+          }}
+        >
+          ⏸ IA PAUSADA
+        </span>
       )}
 
       {order && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-600">
+        <>
           <span
-            className={`px-2 py-0.5 rounded-full font-semibold ${STATUS_COLOR[order.status]}`}
+            style={{
+              padding: "2px 8px",
+              borderRadius: 3,
+              fontSize: 10.5,
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              background: STATUS_COLOR[order.status].bg,
+              color: STATUS_COLOR[order.status].fg,
+              textTransform: "uppercase"
+            }}
           >
             {STATUS_LABEL[order.status]}
           </span>
 
           {order.product && (
-            <span>🛍️ {order.product}{order.color ? ` · ${order.color}` : ""}{order.size ? ` · ${order.size}` : ""}</span>
+            <span style={{ color: "var(--text-muted)" }}>
+              📦 <span style={{ color: "var(--text)", fontWeight: 600 }}>{order.product}</span>
+              {order.color && order.color !== "—" ? ` · ${order.color}` : ""}
+              {order.size && order.size !== "—" ? ` · ${order.size}` : ""}
+            </span>
           )}
 
-          {order.total && <span>💰 {order.total}</span>}
-
-          {order.full_name && <span>👤 {order.full_name}</span>}
+          {order.total && (
+            <span style={{ color: "var(--text-muted)" }}>
+              💰 <span style={{ color: "var(--text)", fontWeight: 600 }}>{order.total}</span>
+            </span>
+          )}
 
           {missing.length > 0 && (
-            <span className="text-red-500">
+            <span style={{ color: "var(--danger)", fontSize: 11 }}>
               ⚠ Falta: {missing.join(", ")}
             </span>
           )}
 
-          <span className="text-gray-400 ml-auto">#{order.id} · {relativeTime(order.updated_at)}</span>
-        </div>
+          <span style={{ color: "var(--text-dim)", marginLeft: "auto", fontSize: 11 }}>
+            #{order.id} · {relativeTime(order.updated_at)}
+            {order.source && ` · ${order.source}`}
+          </span>
+        </>
       )}
     </div>
   );

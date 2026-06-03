@@ -1,24 +1,151 @@
 @import "tailwindcss";
 
+/* ─── Sistema de tokens · Linear Minimal ────────────────────────────────────── */
 :root {
-  --background: #f9fafb;
-  --foreground: #111827;
+  --accent: #5e6ad2;
+  --accent-soft: rgba(94, 106, 210, 0.14);
+  --accent-strong: #4751b8;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+  --font-sans: "Inter", ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
 }
 
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
+  --bg: #08090a;
+  --bg-elev: #0c0d0f;
+  --bg-elev-2: #131418;
+  --bg-hover: #1a1b1f;
+  --bg-active: #1f2027;
+  --border: #1f1f25;
+  --border-strong: #2a2a32;
+  --text: #f4f4f5;
+  --text-muted: #94949a;
+  --text-dim: #5d5d65;
+  --bubble-out: #1f2027;
+  --bubble-in: #131418;
+  --bubble-system: #131418;
+  --success: #46d39a;
+  --success-soft: rgba(70, 211, 154, 0.14);
+  --warning: #ffb547;
+  --warning-soft: rgba(255, 181, 71, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+}
+
+[data-theme="light"] {
+  --bg: #fcfcfd;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #f5f6f8;
+  --bg-hover: #f0f1f4;
+  --bg-active: #ebecf0;
+  --border: #e6e7ec;
+  --border-strong: #d2d4dc;
+  --text: #0a0a0b;
+  --text-muted: #585864;
+  --text-dim: #8e8e98;
+  --bubble-out: #ebecf0;
+  --bubble-in: #ffffff;
+  --bubble-system: #f5f6f8;
+  --success: #16a34a;
+  --success-soft: rgba(22, 163, 74, 0.12);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbar delgada */
+/* Tipografía monoespaciada para teléfonos y datos */
+.font-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* Scrollbar minimal */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
+  height: 6px;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 2px;
+  background: var(--border-strong);
+  border-radius: 3px;
 }
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Selección */
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Inputs sin estilos default */
+input, textarea, button {
+  font-family: inherit;
+}
+button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+
+/* Focus accesible */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Animaciones */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fade-in 0.18s ease-out; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+/* Utility classes para usar tokens en JSX */
+.bg-surface       { background: var(--bg); }
+.bg-elev          { background: var(--bg-elev); }
+.bg-elev-2        { background: var(--bg-elev-2); }
+.bg-hover-x       { background: var(--bg-hover); }
+.bg-active-x      { background: var(--bg-active); }
+.border-token     { border-color: var(--border); }
+.border-token-strong { border-color: var(--border-strong); }
+.text-token       { color: var(--text); }
+.text-muted-token { color: var(--text-muted); }
+.text-dim-token   { color: var(--text-dim); }
+.text-accent      { color: var(--accent); }
+.bg-accent        { background: var(--accent); }
+.bg-accent-soft   { background: var(--accent-soft); }

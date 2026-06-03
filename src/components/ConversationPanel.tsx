@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { Conversation, Message } from "@/lib/types";
 import { jidToDisplay } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
-import ModeToggle from "./ModeToggle";
 import OrderSummary from "./OrderSummary";
 import LabelsPopover from "./LabelsPopover";
 
@@ -16,16 +15,34 @@ interface Props {
   onPinToggle?: (id: number, pinned: boolean) => void;
 }
 
+const AVATAR_GRADIENTS = [
+  ["#5e6ad2", "#4751b8"], ["#46d39a", "#2da776"], ["#f472b6", "#c83a8e"],
+  ["#ffb547", "#c98326"], ["#60a5fa", "#3b82f6"], ["#a78bfa", "#8b5cf6"],
+  ["#fb923c", "#ea580c"], ["#34d399", "#10b981"]
+];
+function avatarColors(seed: string): [string, string] {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return AVATAR_GRADIENTS[Math.abs(h) % AVATAR_GRADIENTS.length] as [string, string];
+}
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export default function ConversationPanel({
   conversation, onModeChange, onDelete, onArchiveToggle, onPinToggle
 }: Props) {
   const isArchived = conversation.archived_at != null;
-  const isPinned = conversation.pinned_at != null;
-  const [labelsOpen, setLabelsOpen] = useState(false);
+  const isPinned   = conversation.pinned_at != null;
+
   const [messages, setMessages]   = useState<Message[]>([]);
-  const [mode, setMode]           = useState(conversation.mode);
+  const [mode, setMode]           = useState<"AI" | "HUMAN">(conversation.mode);
   const [input, setInput]         = useState("");
   const [sending, setSending]     = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
   const bottomRef                 = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,8 +52,8 @@ export default function ConversationPanel({
   }, [conversation.id]);
 
   useEffect(() => {
-    const timer = setInterval(fetchMessages, 2000);
-    return () => clearInterval(timer);
+    const t = setInterval(fetchMessages, 2000);
+    return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id]);
 
@@ -51,18 +68,24 @@ export default function ConversationPanel({
     } catch {}
   }
 
-  function handleModeToggle(newMode: "AI" | "HUMAN") {
-    setMode(newMode);
-    onModeChange(conversation.id, newMode);
+  async function toggleMode() {
+    const next: "AI" | "HUMAN" = mode === "AI" ? "HUMAN" : "AI";
+    setMode(next);
+    onModeChange(conversation.id, next);
+    try {
+      await fetch(`/api/mode/${conversation.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: next })
+      });
+    } catch (err) { console.error(err); }
   }
 
   async function handleSend() {
     const text = input.trim();
     if (!text || sending) return;
-
     setSending(true);
     setInput("");
-
     try {
       await fetch(`/api/messages/${conversation.id}`, {
         method: "POST",
@@ -84,39 +107,78 @@ export default function ConversationPanel({
     onDelete(conversation.id);
   }
 
-  const displayName = conversation.name || jidToDisplay(conversation.phone);
+  const name = conversation.name?.trim() || jidToDisplay(conversation.phone);
+  const [g1, g2] = avatarColors(name);
+  const initials = initialsOf(name);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white shrink-0">
-        <div>
-          <p className="font-semibold text-gray-900">{displayName}</p>
-          <p className="text-xs text-gray-400">{jidToDisplay(conversation.phone)}</p>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
+      {/* Header */}
+      <div
+        style={{
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          background: "var(--bg-elev)"
+        }}
+      >
+        <div
+          style={{
+            width: 36, height: 36, borderRadius: 6,
+            background: `linear-gradient(135deg, ${g1}, ${g2})`,
+            display: "grid", placeItems: "center",
+            color: "#fff", fontWeight: 600, fontSize: 13,
+            flexShrink: 0
+          }}
+        >
+          {initials}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 14,
+              color: "var(--text)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8
+            }}
+          >
+            {isPinned && <span style={{ fontSize: 11, color: "var(--text-dim)" }}>📌</span>}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {name}
+            </span>
+          </div>
+          <div
+            className="font-mono"
+            style={{ fontSize: 11, color: "var(--text-muted)" }}
+          >
+            {jidToDisplay(conversation.phone)}
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <ModeToggle
-            conversationId={conversation.id}
-            mode={mode}
-            onToggle={handleModeToggle}
-          />
+        {/* Action buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <ModeChip mode={mode} onClick={toggleMode} />
           {onPinToggle && (
-            <button
+            <IconBtn
+              active={isPinned}
               onClick={() => onPinToggle(conversation.id, isPinned)}
-              className={`text-xs transition-colors ${isPinned ? "text-amber-600" : "text-gray-500 hover:text-amber-600"}`}
               title={isPinned ? "Desfijar" : "Fijar arriba"}
             >
-              {isPinned ? "📌 Fijado" : "📌 Fijar"}
-            </button>
+              📌
+            </IconBtn>
           )}
-          <div className="relative">
-            <button
+          <div style={{ position: "relative" }}>
+            <IconBtn
+              active={labelsOpen}
               onClick={() => setLabelsOpen((v) => !v)}
-              className="text-xs text-gray-500 hover:text-violet-600 transition-colors"
               title="Etiquetas"
             >
-              🏷️ Etiquetas
-            </button>
+              🏷️
+            </IconBtn>
             {labelsOpen && (
               <LabelsPopover
                 conversationId={conversation.id}
@@ -125,28 +187,44 @@ export default function ConversationPanel({
             )}
           </div>
           {onArchiveToggle && (
-            <button
+            <IconBtn
               onClick={() => onArchiveToggle(conversation.id, isArchived)}
-              className="text-xs text-gray-500 hover:text-amber-600 transition-colors"
               title={isArchived ? "Desarchivar" : "Archivar"}
             >
-              {isArchived ? "Desarchivar" : "Archivar"}
-            </button>
+              {isArchived ? "↩️" : "📁"}
+            </IconBtn>
           )}
-          <button
-            onClick={handleDelete}
-            className="text-xs text-red-400 hover:text-red-600 transition-colors"
-          >
-            Borrar
-          </button>
+          <IconBtn onClick={handleDelete} title="Borrar" danger>
+            🗑️
+          </IconBtn>
         </div>
       </div>
 
+      {/* Order summary */}
       <OrderSummary conversationId={conversation.id} />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50">
+      {/* Messages */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px 20px 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8
+        }}
+      >
         {messages.length === 0 && (
-          <p className="text-center text-sm text-gray-400 mt-8">Sin mensajes aún.</p>
+          <div
+            style={{
+              textAlign: "center",
+              color: "var(--text-dim)",
+              fontSize: 12,
+              marginTop: 32
+            }}
+          >
+            Sin mensajes todavía.
+          </div>
         )}
         {messages.map((msg) => (
           <MessageBubble
@@ -159,32 +237,153 @@ export default function ConversationPanel({
         <div ref={bottomRef} />
       </div>
 
-      <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3">
+      {/* Composer */}
+      <div
+        style={{
+          padding: "10px 14px",
+          borderTop: "1px solid var(--border)",
+          background: "var(--bg-elev)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8
+        }}
+      >
         {mode === "AI" ? (
-          <p className="text-xs text-center text-gray-400">
-            El bot responde automáticamente en modo IA.
-          </p>
+          <div
+            style={{
+              flex: 1,
+              textAlign: "center",
+              fontSize: 12,
+              color: "var(--text-muted)",
+              padding: "8px 12px"
+            }}
+          >
+            🤖 El bot responde automáticamente en modo IA — cambia a HUMAN para escribir manualmente
+          </div>
         ) : (
-          <div className="flex gap-2">
+          <>
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-              placeholder="Escribir mensaje..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={`Mensaje a ${name.split(" ")[0]}...`}
               disabled={sending}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-400 disabled:opacity-50"
+              style={{
+                flex: 1,
+                background: "var(--bg-elev-2)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                padding: "8px 12px",
+                color: "var(--text)",
+                fontSize: 13.5,
+                fontFamily: "inherit",
+                outline: 0,
+                opacity: sending ? 0.5 : 1
+              }}
             />
             <button
               onClick={handleSend}
               disabled={sending || !input.trim()}
-              className="bg-amber-400 hover:bg-amber-500 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50 transition-colors"
+              style={{
+                padding: "7px 14px",
+                background: input.trim() ? "var(--accent)" : "var(--bg-elev-2)",
+                color: input.trim() ? "#fff" : "var(--text-dim)",
+                borderRadius: "var(--radius)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.1s"
+              }}
             >
               Enviar
+              <span
+                style={{
+                  fontSize: 10,
+                  opacity: 0.8,
+                  padding: "0 4px",
+                  background: input.trim() ? "rgba(255,255,255,0.18)" : "transparent",
+                  borderRadius: 3
+                }}
+              >
+                ↵
+              </span>
             </button>
-          </div>
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+function IconBtn({
+  children, onClick, title, active, danger
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  title?: string;
+  active?: boolean;
+  danger?: boolean;
+}) {
+  const color = danger ? "var(--danger)" : (active ? "var(--accent)" : "var(--text-muted)");
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 30, height: 30,
+        borderRadius: "var(--radius-sm)",
+        display: "grid", placeItems: "center",
+        color,
+        background: active ? "var(--accent-soft)" : "transparent",
+        fontSize: 13,
+        transition: "all 0.1s"
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--bg-hover)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ModeChip({
+  mode, onClick
+}: {
+  mode: "AI" | "HUMAN";
+  onClick: () => void;
+}) {
+  const isAi = mode === "AI";
+  return (
+    <button
+      onClick={onClick}
+      title={`Modo actual: ${mode}. Click para cambiar.`}
+      style={{
+        padding: "4px 10px",
+        borderRadius: 4,
+        fontSize: 10.5,
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        background: isAi ? "var(--success-soft)" : "var(--warning-soft)",
+        color: isAi ? "var(--success)" : "var(--warning)",
+        marginRight: 4,
+        transition: "opacity 0.1s"
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+    >
+      {mode}
+    </button>
   );
 }

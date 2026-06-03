@@ -43,7 +43,6 @@ export default function QRScreen({ onConnected }: Props) {
     const pollTimer = setInterval(poll, 2000);
     poll();
 
-    // Contador para detectar estado disconnected prolongado
     stuckInterval = setInterval(() => {
       setStuckSeconds((s) => s + 1);
     }, 1000);
@@ -54,66 +53,177 @@ export default function QRScreen({ onConnected }: Props) {
     };
   }, [onConnected]);
 
-  // Resetear contador cuando hay actividad
   useEffect(() => {
     setStuckSeconds(0);
   }, [updatedAt]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-2xl font-bold text-gray-800">Conectar número</h1>
-      <p className="text-sm text-gray-500 text-center max-w-xs">
-        Abre WhatsApp en tu teléfono, ve a{" "}
-        <strong>Dispositivos vinculados</strong> y escanea el código QR.
-      </p>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--bg)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "32px 20px",
+        gap: 24
+      }}
+    >
+      {/* Logo Eclipse */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            width: 32, height: 32, borderRadius: 7,
+            background: "var(--accent)",
+            color: "#fff",
+            display: "grid", placeItems: "center",
+            fontWeight: 700, fontSize: 14
+          }}
+        >
+          E
+        </div>
+        <span style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", letterSpacing: "-0.01em" }}>
+          Eclipse
+        </span>
+      </div>
 
-      {/* QR image */}
-      <div className="bg-white rounded-2xl shadow-md p-6 flex flex-col items-center gap-4">
+      <div style={{ textAlign: "center", maxWidth: 340 }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 22,
+            fontWeight: 600,
+            color: "var(--text)",
+            letterSpacing: "-0.01em"
+          }}
+        >
+          Conectar WhatsApp
+        </h1>
+        <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.55 }}>
+          Abrí WhatsApp en tu teléfono, andá a{" "}
+          <strong style={{ color: "var(--text)" }}>Ajustes → Dispositivos vinculados</strong>{" "}
+          y escaneá el código.
+        </p>
+      </div>
+
+      {/* QR card */}
+      <div
+        style={{
+          background: "var(--bg-elev)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)",
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 16
+        }}
+      >
         {qrPng ? (
-          <img
-            src={qrPng}
-            alt="Código QR de WhatsApp"
-            className="w-64 h-64"
-          />
+          <div
+            style={{
+              background: "#fff",
+              padding: 16,
+              borderRadius: 10
+            }}
+          >
+            <img
+              src={qrPng}
+              alt="Código QR de WhatsApp"
+              style={{ width: 256, height: 256, display: "block" }}
+            />
+          </div>
         ) : (
-          <div className="w-64 h-64 flex items-center justify-center bg-gray-100 rounded-xl">
-            <div className="w-8 h-8 border-4 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+          <div
+            style={{
+              width: 288, height: 288,
+              display: "grid", placeItems: "center",
+              background: "var(--bg-elev-2)",
+              borderRadius: 10
+            }}
+          >
+            <div
+              style={{
+                width: 28, height: 28,
+                border: "3px solid var(--border-strong)",
+                borderTopColor: "var(--accent)",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite"
+              }}
+            />
           </div>
         )}
 
         {/* Estado */}
-        <div className="flex items-center gap-2">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {status === "qr" && (
             <>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-sm text-amber-600">Esperando escaneo...</span>
+              <span
+                className="pulse-dot"
+                style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: "var(--warning)"
+                }}
+              />
+              <span style={{ fontSize: 13, color: "var(--warning)" }}>
+                Esperando escaneo...
+              </span>
             </>
           )}
           {status === "connecting" && (
             <>
-              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-              <span className="text-sm text-blue-600">Conectando...</span>
+              <span
+                className="pulse-dot"
+                style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: "var(--accent)"
+                }}
+              />
+              <span style={{ fontSize: 13, color: "var(--accent)" }}>
+                Conectando...
+              </span>
             </>
           )}
           {status === "disconnected" && (
             <>
-              <div className="w-4 h-4 border-2 border-gray-400 border-t-gray-600 rounded-full animate-spin" />
-              <span className="text-sm text-gray-500">Iniciando bot...</span>
+              <div
+                style={{
+                  width: 14, height: 14,
+                  border: "2px solid var(--border-strong)",
+                  borderTopColor: "var(--text-muted)",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite"
+                }}
+              />
+              <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                Iniciando bot...
+              </span>
             </>
           )}
         </div>
       </div>
 
-      {/* Mensaje de error si lleva más de 30s en disconnected sin QR */}
       {status === "disconnected" && !qrPng && stuckSeconds > 30 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-xs text-center">
-          <p className="text-sm text-red-600">
+        <div
+          style={{
+            background: "var(--danger-soft)",
+            border: "1px solid var(--danger)",
+            borderRadius: "var(--radius)",
+            padding: "12px 16px",
+            maxWidth: 320,
+            textAlign: "center"
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--danger)" }}>
             El bot tardó más de lo esperado en iniciar.
             <br />
-            Recarga la página o revisa la consola del servidor.
+            Recargá la página o revisá los logs del servidor.
           </p>
         </div>
       )}
+
+      <style jsx>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

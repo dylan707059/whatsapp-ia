@@ -14,27 +14,18 @@ interface Label extends LabelLite {
 }
 
 const PALETTE = [
-  "#5e6ad2", // violet (default)
-  "#46d39a", // green
-  "#ffb547", // amber
-  "#f472b6", // pink
-  "#60a5fa", // blue
-  "#f87171", // red
-  "#a78bfa", // purple
-  "#34d399", // emerald
-  "#fb923c", // orange
-  "#94a3b8"  // slate
+  "#5e6ad2", "#46d39a", "#ffb547", "#f472b6", "#60a5fa",
+  "#f87171", "#a78bfa", "#34d399", "#fb923c", "#94a3b8"
 ];
 
 export default function LabelsPopover({ conversationId, onClose }: Props) {
-  const [allLabels, setAllLabels]       = useState<Label[]>([]);
-  const [assignedIds, setAssignedIds]   = useState<Set<number>>(new Set());
-  const [creating, setCreating]         = useState(false);
-  const [newName, setNewName]           = useState("");
-  const [newColor, setNewColor]         = useState(PALETTE[0]);
+  const [allLabels, setAllLabels]     = useState<Label[]>([]);
+  const [assignedIds, setAssignedIds] = useState<Set<number>>(new Set());
+  const [creating, setCreating]       = useState(false);
+  const [newName, setNewName]         = useState("");
+  const [newColor, setNewColor]       = useState(PALETTE[0]);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Cargar labels disponibles y asignadas
   useEffect(() => {
     Promise.all([
       fetch("/api/labels").then((r) => r.json() as Promise<{ labels: Label[] }>),
@@ -45,7 +36,6 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
     });
   }, [conversationId]);
 
-  // Cerrar al click fuera
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
@@ -81,7 +71,6 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
     if (!res.ok) return;
     const data = await res.json() as { label: Label };
     setAllLabels((prev) => [...prev, data.label]);
-    // Auto-asignar a la conv actual
     await fetch(`/api/conversations/${conversationId}/labels`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -106,39 +95,99 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-7 z-20 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3"
+      className="fade-in"
+      style={{
+        position: "absolute",
+        right: 0,
+        top: 36,
+        zIndex: 30,
+        width: 280,
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border-strong)",
+        borderRadius: "var(--radius-lg)",
+        padding: 12,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.25)"
+      }}
     >
-      <div className="text-xs font-semibold text-gray-500 uppercase mb-2 tracking-wide">
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-dim)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          marginBottom: 8,
+          padding: "0 4px"
+        }}
+      >
         Etiquetas
       </div>
 
-      <div className="max-h-56 overflow-y-auto space-y-1">
+      <div style={{ maxHeight: 220, overflowY: "auto" }}>
         {allLabels.length === 0 && !creating && (
-          <p className="text-xs text-gray-400 py-2">
+          <p style={{ fontSize: 12, color: "var(--text-dim)", padding: "8px 4px", margin: 0 }}>
             Sin etiquetas. Creá la primera abajo.
           </p>
         )}
         {allLabels.map((label) => {
           const assigned = assignedIds.has(label.id);
           return (
-            <div key={label.id} className="flex items-center gap-2 group">
+            <div
+              key={label.id}
+              style={{ display: "flex", alignItems: "center", gap: 4 }}
+              onMouseEnter={(e) => {
+                const del = e.currentTarget.querySelector("[data-del]") as HTMLElement;
+                if (del) del.style.opacity = "1";
+              }}
+              onMouseLeave={(e) => {
+                const del = e.currentTarget.querySelector("[data-del]") as HTMLElement;
+                if (del) del.style.opacity = "0";
+              }}
+            >
               <button
                 onClick={() => toggleAssign(label.id, assigned)}
-                className="flex-1 flex items-center gap-2 text-left py-1 px-2 rounded hover:bg-gray-50"
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: "var(--radius-sm)",
+                  transition: "background 0.1s",
+                  fontSize: 13.5,
+                  color: "var(--text)"
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
                 <span
-                  className="w-4 h-4 rounded border-2"
                   style={{
-                    backgroundColor: assigned ? label.color : "transparent",
-                    borderColor: label.color
+                    width: 14, height: 14, borderRadius: 4,
+                    background: assigned ? label.color : "transparent",
+                    border: `2px solid ${label.color}`,
+                    flexShrink: 0,
+                    display: "grid",
+                    placeItems: "center",
+                    color: "#fff",
+                    fontSize: 9,
+                    fontWeight: 700
                   }}
-                />
-                <span className="text-sm flex-1">{label.name}</span>
-                {assigned && <span className="text-xs text-gray-400">✓</span>}
+                >
+                  {assigned && "✓"}
+                </span>
+                <span style={{ flex: 1 }}>{label.name}</span>
               </button>
               <button
+                data-del
                 onClick={() => handleDeleteLabel(label.id)}
-                className="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 px-1"
+                style={{
+                  opacity: 0,
+                  fontSize: 11,
+                  color: "var(--danger)",
+                  padding: "0 6px",
+                  transition: "opacity 0.1s"
+                }}
                 title="Borrar etiqueta"
               >
                 ✕
@@ -148,48 +197,73 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
         })}
       </div>
 
-      <div className="border-t border-gray-100 mt-2 pt-2">
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}>
         {!creating ? (
           <button
             onClick={() => setCreating(true)}
-            className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+            style={{
+              fontSize: 12,
+              color: "var(--accent)",
+              fontWeight: 600,
+              padding: "4px 4px"
+            }}
           >
             + Crear etiqueta
           </button>
         ) : (
-          <div className="space-y-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="Nombre de la etiqueta"
+              placeholder="Nombre"
               maxLength={40}
               autoFocus
-              className="w-full text-sm border border-gray-200 rounded px-2 py-1 outline-none focus:border-violet-400"
+              style={{
+                background: "var(--bg-elev-2)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                padding: "6px 10px",
+                fontSize: 13,
+                color: "var(--text)",
+                outline: 0,
+                fontFamily: "inherit"
+              }}
             />
-            <div className="flex gap-1 flex-wrap">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {PALETTE.map((c) => (
                 <button
                   key={c}
                   onClick={() => setNewColor(c)}
-                  className={`w-5 h-5 rounded-full ${newColor === c ? "ring-2 ring-offset-1 ring-gray-400" : ""}`}
-                  style={{ backgroundColor: c }}
+                  style={{
+                    width: 20, height: 20, borderRadius: "50%",
+                    background: c,
+                    border: newColor === c ? `2px solid var(--text)` : "2px solid transparent",
+                    transition: "transform 0.1s"
+                  }}
                   title={c}
                 />
               ))}
             </div>
-            <div className="flex gap-2">
+            <div style={{ display: "flex", gap: 6 }}>
               <button
                 onClick={handleCreate}
                 disabled={!newName.trim()}
-                className="bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium px-3 py-1 rounded disabled:opacity-50"
+                style={{
+                  background: newName.trim() ? "var(--accent)" : "var(--bg-elev-2)",
+                  color: newName.trim() ? "#fff" : "var(--text-dim)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "5px 12px",
+                  borderRadius: "var(--radius-sm)"
+                }}
               >
                 Crear
               </button>
               <button
                 onClick={() => { setCreating(false); setNewName(""); }}
-                className="text-xs text-gray-500 hover:text-gray-700 px-2"
+                style={{ fontSize: 12, color: "var(--text-muted)", padding: "5px 8px" }}
               >
                 Cancelar
               </button>

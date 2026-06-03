@@ -11,7 +11,8 @@ import {
   isClientBlocked,
   advancePendingOutbox,
   findRecentShopifyConversationByName,
-  deleteConversation
+  deleteConversation,
+  isAutomationPausedForPhone
 } from "../db";
 import { registerContact } from "./contact-store";
 import { generateReply } from "../openai";
@@ -161,6 +162,14 @@ async function processMessage(
     }
   }
   insertMessage(convo.id, "user", text);
+
+  // ─── Interruptor de automatización (botón de pánico) ──────────────────────
+  // Si el owner apagó la automatización, guardamos el mensaje (para que lo vea
+  // en el dashboard y responda manualmente) pero el bot no hace NADA automático.
+  if (isAutomationPausedForPhone(ownerPhone)) {
+    console.log(`[bot] Automatización pausada para ${ownerPhone} — mensaje guardado sin responder`);
+    return;
+  }
 
   // ─── SILENCIO post-confirmación ───────────────────────────────────────────
   // Una vez que el pedido fue confirmado (confirmed_at != null), el bot deja

@@ -222,12 +222,13 @@ db.exec(`
   -- Cada cuenta es un negocio distinto. Los datos del sistema se asocian al
   -- negocio via owner_phone (el numero de WhatsApp conectado de esa cuenta).
   CREATE TABLE IF NOT EXISTS accounts (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    business_name TEXT,
-    owner_phone   TEXT,
-    created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    email            TEXT NOT NULL UNIQUE,
+    password_hash    TEXT NOT NULL,
+    business_name    TEXT,
+    owner_phone      TEXT,
+    automation_paused INTEGER NOT NULL DEFAULT 0,
+    created_at       INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -322,6 +323,17 @@ db.exec(`
     const cols = (db.prepare("PRAGMA table_info(account_connections)").all() as { name: string }[])
       .map(c => c.name);
     if (!cols.includes("wanted_at")) db.exec("ALTER TABLE account_connections ADD COLUMN wanted_at INTEGER");
+  }
+}
+{
+  const tableExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'"
+  ).get();
+  if (tableExists) {
+    const cols = (db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[])
+      .map(c => c.name);
+    if (!cols.includes("automation_paused"))
+      db.exec("ALTER TABLE accounts ADD COLUMN automation_paused INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -820,6 +832,7 @@ export interface Account {
   password_hash: string;
   business_name: string | null;
   owner_phone: string | null;
+  automation_paused: number;
   created_at: number;
 }
 
@@ -1056,6 +1069,30 @@ export function setAccountOwnerPhone(accountId: number, phone: string): void {
 
 export function getAccountByOwnerPhone(phone: string): Account | undefined {
   return stmtGetAccountByOwnerPhone.get(phone);
+}
+
+// ─── Interruptor de automatización (botón de pánico, por cuenta) ──────────────
+// Cuando está pausada, el bot NO hace nada automático (ni IA, ni confirmaciones,
+// ni recordatorios, ni avisos). Los mensajes entrantes se guardan igual y el
+// owner puede seguir escribiendo manualmente.
+const stmtSetAutoPaused = db.prepare<[number, number]>(
+  "UPDATE accounts SET automation_paused = ? WHERE id = ?"
+);
+const stmtIsAutoPaused = db.prepare<[number], { automation_paused: number }>(
+  "SELECT automation_paused FROM accounts WHERE id = ?"
+);
+
+export function setAccountAutomationPaused(accountId: number, paused: boolean): void {
+  stmtSetAutoPaused.run(paused ? 1 : 0, accountId);
+}
+export function isAccountAutomationPaused(accountId: number): boolean {
+  return (stmtIsAutoPaused.get(accountId)?.automation_paused ?? 0) === 1;
+}
+/** Pausa de automatización resuelta por el número de WhatsApp conectado. */
+export function isAutomationPausedForPhone(phone: string): boolean {
+  if (!phone) return false;
+  const acc = getAccountByOwnerPhone(phone);
+  return acc ? acc.automation_paused === 1 : false;
 }
 
 // ─── Auto-seed de la cuenta inicial desde variables de entorno ────────────────

@@ -7,7 +7,8 @@ import {
   getActiveAccountSettings,
   getAccountSettingsByShopDomain,
   getAccountById,
-  getAccountConnection
+  getAccountConnection,
+  isAccountAutomationPaused
 } from "@/lib/db";
 import { upsertOrder, computeOrderHash, findOrderByHash } from "@/lib/orders";
 import { normalizePhone, phoneToJid } from "@/lib/phone-utils";
@@ -63,6 +64,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ─── 4. Resolver la cuenta dueña y su número conectado ─────────────────────
   const account = settings ? getAccountById(settings.account_id) : undefined;
+
+  // Interruptor de automatización: si la cuenta lo apagó, no procesamos nada.
+  if (account && isAccountAutomationPaused(account.id)) {
+    console.log(`[shopify] Automatización pausada para cuenta ${account.id} — pedido ${parsed.orderNumber} ignorado`);
+    return NextResponse.json({ ok: true, skipped: "automation_paused" });
+  }
+
   const ownerPhone = account?.owner_phone ?? "";
   const conn = account ? getAccountConnection(account.id) : undefined;
   if (!ownerPhone || conn?.status !== "connected") {

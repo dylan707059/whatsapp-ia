@@ -28,6 +28,7 @@ interface Props {
 
 export default function Sidebar(props: Props) {
   const [labels, setLabels] = useState<Label[]>([]);
+  const [paused, setPaused] = useState<boolean | null>(null);
 
   useEffect(() => {
     fetch("/api/labels")
@@ -42,6 +43,34 @@ export default function Sidebar(props: Props) {
     }, 5000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    const load = () =>
+      fetch("/api/automation")
+        .then((r) => r.json() as Promise<{ paused: boolean }>)
+        .then((d) => setPaused(Boolean(d.paused)))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function toggleAutomation() {
+    const next = !(paused ?? false);
+    if (next && !confirm(
+      "¿Apagar TODA la automatización?\n\nEl bot dejará de responder, confirmar pedidos, mandar recordatorios y avisos. Solo podrás escribir manualmente.\n\nPuedes reactivarlo cuando quieras."
+    )) return;
+    setPaused(next);
+    try {
+      await fetch("/api/automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: next })
+      });
+    } catch {
+      setPaused(!next); // revertir si falla
+    }
+  }
 
   return (
     <nav
@@ -89,6 +118,37 @@ export default function Sidebar(props: Props) {
         </div>
         <ThemeToggle />
       </div>
+
+      {/* Interruptor de automatización (botón de pánico) */}
+      <button
+        onClick={toggleAutomation}
+        title={paused ? "Reanudar la automatización" : "Apagar toda la automatización"}
+        style={{
+          width: "100%",
+          margin: "0 0 10px",
+          padding: "10px 12px",
+          borderRadius: "var(--radius)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          fontSize: 12.5,
+          fontWeight: 600,
+          textAlign: "left",
+          transition: "all 0.12s",
+          background: paused ? "rgba(239,68,68,0.14)" : "var(--bg-hover)",
+          color: paused ? "#ef4444" : "var(--text-muted)",
+          border: paused ? "1px solid #ef4444" : "1px solid var(--border)"
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{paused ? "⏸" : "🤖"}</span>
+        <span style={{ flex: 1, lineHeight: 1.3 }}>
+          {paused === null
+            ? "Cargando…"
+            : paused
+              ? "Automatización APAGADA"
+              : "Bot activo · tocá para apagar"}
+        </span>
+      </button>
 
       {/* Vistas principales */}
       <div style={{ marginTop: 6 }}>

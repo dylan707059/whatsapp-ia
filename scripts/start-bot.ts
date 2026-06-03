@@ -6,7 +6,8 @@ import { start, listHandles, isManaged, stopAccount, stopAndWipe } from "../src/
 import {
   getPendingOutbox, claimOutboxItem, unclaimOutboxItem, enqueueOutbox, insertMessage,
   setMessageWaId, getPendingRevokes, markRevokeDone,
-  listAllAccounts, getAccountConnection, getConversationById
+  listAllAccounts, getAccountConnection, getConversationById,
+  isAccountAutomationPaused
 } from "../src/lib/db";
 import {
   getOrdersNeedingReminder,
@@ -146,6 +147,8 @@ setInterval(() => {
   for (const h of listHandles()) {
     const conn = getAccountConnection(h.accountId);
     if (conn.status !== "connected" || !conn.phone) continue;
+    // Saltar recordatorios/auto-cancelación si la cuenta apagó la automatización.
+    if (isAccountAutomationPaused(h.accountId)) continue;
     const currentOwner = conn.phone;
 
     for (const order of getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {

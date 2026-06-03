@@ -23,7 +23,8 @@ export type OrderEventType =
   | "OWNER_NOTIFIED"
   | "OWNER_NOTIFICATION_ERROR"
   | "SHOPIFY_ORDER_RECEIVED"
-  | "SHOPIFY_ORDER_DUPLICATE";
+  | "SHOPIFY_ORDER_DUPLICATE"
+  | "SHOPIFY_ORDER_REJECTED_BLOCKED_ZONE";
 
 export interface OrderEventInput {
   orderId?: number | null;

@@ -15,6 +15,7 @@ import {
   buildConfirmationMessage,
   type ShopifyOrderPayload
 } from "@/lib/shopify";
+import { isBlockedZone, buildRejectionMessage } from "@/lib/colombia-zones";
 import { insertOrderEvent } from "@/lib/order-events";
 
 export const runtime = "nodejs";
@@ -67,8 +68,55 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // El owner puede toggle a AI manualmente desde el dashboard si quiere.
   setConversationMode(conv.id, "HUMAN");
 
-  // ─── 6. Anti-duplicado por hash del pedido ────────────────────────────────
   const orderData = toOrderData(parsed, conv.id);
+
+  // ─── 6. Rechazo de zonas no cubiertas ─────────────────────────────────────
+  // Si el departamento o ciudad están en la blacklist (San Andrés, Amazonas,
+  // Vaupés, Guainía, Vichada por default), creamos el pedido directamente
+  // como CANCELLED y enviamos un mensaje amable con alternativa al cliente.
+  const zoneCheck = isBlockedZone(orderData.city, orderData.department);
+  if (zoneCheck.blocked) {
+    const orderId = upsertOrder(conv.id, orderData, "CANCELLED", "SHOPIFY");
+    const zoneLabel = zoneCheck.matchedDepartment ?? zoneCheck.matchedCity ?? "tu zona";
+    const rejectionText = buildRejectionMessage(parsed.firstName, parsed.orderNumber, zoneLabel);
+
+    insertOrderEvent({
+      orderId,
+      conversationId: conv.id,
+      eventType: "SHOPIFY_ORDER_REJECTED_BLOCKED_ZONE",
+      message: `Pedido ${parsed.orderNumber} rechazado: ${zoneCheck.reason}`,
+      metadata: {
+        shopifyOrderId: parsed.orderId,
+        shopifyOrderNumber: parsed.orderNumber,
+        matchedDepartment: zoneCheck.matchedDepartment,
+        matchedCity: zoneCheck.matchedCity,
+        city: orderData.city,
+        department: orderData.department
+      }
+    });
+
+    // Respetar mismo delay anti-bloqueo que las confirmaciones normales
+    const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+    const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
+
+    insertMessage(conv.id, "assistant", rejectionText);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt);
+
+    console.log(
+      `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por zona no cubierta (${zoneLabel}) — ` +
+      `conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — order #${orderId} CANCELLED`
+    );
+
+    return NextResponse.json({
+      ok: true,
+      skipped: "blocked_zone",
+      reason: zoneCheck.reason,
+      orderId,
+      conversationId: conv.id
+    });
+  }
+
+  // ─── 7. Anti-duplicado por hash del pedido ────────────────────────────────
   const hash = computeOrderHash({
     phone:      orderData.phone,
     product:    orderData.product,

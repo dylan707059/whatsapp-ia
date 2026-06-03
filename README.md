@@ -253,6 +253,30 @@ WhatsApp al cliente pidiendo confirmar los datos antes de despachar.
 7. Cuando el cliente responde **CONFIRMADO** se dispara el flujo existente
    de `order-confirmation.ts` y se notifica al owner.
 
+### Zonas no cubiertas (blacklist de envío)
+
+Si un pedido cae en una zona donde no realizamos envíos, el webhook lo
+marca automáticamente como `CANCELLED` y envía un mensaje amable al
+cliente ofreciendo dirección alternativa o coordinar transporte directo.
+
+**Default bloqueado:**
+- San Andrés y Providencia (islas)
+- Amazonas (Leticia, Puerto Nariño)
+- Vaupés (Mitú, Carurú)
+- Guainía (Inírida)
+- Vichada (Puerto Carreño y otros)
+
+Configurable via variables de entorno (separadas por coma):
+
+```
+SHOPIFY_BLOCKED_DEPARTMENTS=San Andres y Providencia,Amazonas,Vaupes,Guainia,Vichada
+SHOPIFY_BLOCKED_CITIES=San Andres,Providencia,Leticia,Mitu,Inirida,Puerto Carreno
+```
+
+El matching es case-insensitive y sin tildes (acepta "San Andrés", "san andres",
+"SAN ANDRES ISLAS", etc.). El cliente recibe un mensaje con dos opciones:
+dirección alternativa de familiar o coordinación de carga directa.
+
 ### Tunear el delay anti-bloqueo
 
 Variable de entorno opcional `SHOPIFY_CONFIRMATION_DELAY_SECONDS` (default

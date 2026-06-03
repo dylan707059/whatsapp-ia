@@ -103,6 +103,22 @@ export default function ConnectionGate() {
     }
   }
 
+  async function handlePinToggle(id: number, pinned: boolean) {
+    try {
+      const action = pinned ? "unpin" : "pin";
+      const res = await fetch(`/api/conversations/${id}/${action}`, { method: "POST" });
+      if (!res.ok) {
+        const { error } = await res.json() as { error?: string };
+        if (error) alert(error);
+        return;
+      }
+      // Refrescar lista (cambia de orden)
+      fetchConversations();
+    } catch (err) {
+      console.error("Error toggling pin:", err);
+    }
+  }
+
   if (appStatus === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -154,6 +170,7 @@ export default function ConnectionGate() {
               onModeChange={handleModeChange}
               onDelete={handleDelete}
               onArchiveToggle={handleArchiveToggle}
+              onPinToggle={handlePinToggle}
             />
           ) : (
             <div className="h-full flex items-center justify-center">

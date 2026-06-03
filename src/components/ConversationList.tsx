@@ -44,7 +44,10 @@ export default function ConversationList({ conversations, selectedId, onSelect }
             `}
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="font-medium text-sm text-gray-900 truncate max-w-[130px]">
+              <span className="font-medium text-sm text-gray-900 truncate max-w-[130px] flex items-center gap-1">
+                {conv.pinned_at && (
+                  <span className="text-amber-500" title="Fijado">📌</span>
+                )}
                 {conv.name || jidToDisplay(conv.phone)}
               </span>
               <span className="text-[10px] text-gray-400 ml-2 shrink-0">
@@ -68,6 +71,23 @@ export default function ConversationList({ conversations, selectedId, onSelect }
                 {conv.mode}
               </span>
             </div>
+
+            {conv.labels && conv.labels.length > 0 && (
+              <div className="flex gap-1 mt-1.5 flex-wrap">
+                {conv.labels.map((label) => (
+                  <span
+                    key={label.id}
+                    className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    style={{
+                      backgroundColor: `${label.color}22`,
+                      color: label.color
+                    }}
+                  >
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            )}
           </button>
         </li>
       ))}

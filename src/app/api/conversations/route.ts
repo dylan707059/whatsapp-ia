@@ -3,6 +3,7 @@ import {
   listConversations,
   listArchivedConversations,
   countArchivedConversations,
+  getAllConversationLabels,
   getConnectionState
 } from "@/lib/db";
 
@@ -21,8 +22,17 @@ export async function GET(req: NextRequest) {
 
   const archivedCount = countArchivedConversations(ownerPhone);
 
+  // Enriquecer cada conv con sus labels (lite, solo id/name/color)
+  const labelsByConv = getAllConversationLabels(ownerPhone);
+  const enriched = conversations.map((c) => ({
+    ...c,
+    labels: (labelsByConv.get(c.id) ?? []).map((l) => ({
+      id: l.id, name: l.name, color: l.color
+    }))
+  }));
+
   return NextResponse.json({
-    conversations,
+    conversations: enriched,
     archivedCount,
     showingArchived: archived
   });

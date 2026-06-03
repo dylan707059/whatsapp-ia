@@ -6,16 +6,22 @@ import { jidToDisplay } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import ModeToggle from "./ModeToggle";
 import OrderSummary from "./OrderSummary";
+import LabelsPopover from "./LabelsPopover";
 
 interface Props {
   conversation: Conversation;
   onModeChange: (id: number, mode: "AI" | "HUMAN") => void;
   onDelete: (id: number) => void;
   onArchiveToggle?: (id: number, archived: boolean) => void;
+  onPinToggle?: (id: number, pinned: boolean) => void;
 }
 
-export default function ConversationPanel({ conversation, onModeChange, onDelete, onArchiveToggle }: Props) {
+export default function ConversationPanel({
+  conversation, onModeChange, onDelete, onArchiveToggle, onPinToggle
+}: Props) {
   const isArchived = conversation.archived_at != null;
+  const isPinned = conversation.pinned_at != null;
+  const [labelsOpen, setLabelsOpen] = useState(false);
   const [messages, setMessages]   = useState<Message[]>([]);
   const [mode, setMode]           = useState(conversation.mode);
   const [input, setInput]         = useState("");
@@ -94,6 +100,30 @@ export default function ConversationPanel({ conversation, onModeChange, onDelete
             mode={mode}
             onToggle={handleModeToggle}
           />
+          {onPinToggle && (
+            <button
+              onClick={() => onPinToggle(conversation.id, isPinned)}
+              className={`text-xs transition-colors ${isPinned ? "text-amber-600" : "text-gray-500 hover:text-amber-600"}`}
+              title={isPinned ? "Desfijar" : "Fijar arriba"}
+            >
+              {isPinned ? "📌 Fijado" : "📌 Fijar"}
+            </button>
+          )}
+          <div className="relative">
+            <button
+              onClick={() => setLabelsOpen((v) => !v)}
+              className="text-xs text-gray-500 hover:text-violet-600 transition-colors"
+              title="Etiquetas"
+            >
+              🏷️ Etiquetas
+            </button>
+            {labelsOpen && (
+              <LabelsPopover
+                conversationId={conversation.id}
+                onClose={() => setLabelsOpen(false)}
+              />
+            )}
+          </div>
           {onArchiveToggle && (
             <button
               onClick={() => onArchiveToggle(conversation.id, isArchived)}

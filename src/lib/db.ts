@@ -50,8 +50,29 @@ db.exec(`
     ai_paused_until  INTEGER,
     blocked_at       INTEGER,
     archived_at      INTEGER,
+    pinned_at        INTEGER,
     UNIQUE(phone, owner_phone)
   );
+
+  CREATE TABLE IF NOT EXISTS labels (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_phone TEXT NOT NULL DEFAULT '',
+    name        TEXT NOT NULL,
+    color       TEXT NOT NULL DEFAULT '#5e6ad2',
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_labels_owner ON labels(owner_phone);
+
+  CREATE TABLE IF NOT EXISTS conversation_labels (
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    label_id        INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (conversation_id, label_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_conv_labels_conv  ON conversation_labels(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_conv_labels_label ON conversation_labels(label_id);
 
   CREATE TABLE IF NOT EXISTS messages (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +200,7 @@ db.exec(`
   if (!cols.includes("blocked_at"))        db.exec("ALTER TABLE conversations ADD COLUMN blocked_at INTEGER");
   if (!cols.includes("owner_phone"))       db.exec("ALTER TABLE conversations ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''");
   if (!cols.includes("archived_at"))       db.exec("ALTER TABLE conversations ADD COLUMN archived_at INTEGER");
+  if (!cols.includes("pinned_at"))         db.exec("ALTER TABLE conversations ADD COLUMN pinned_at INTEGER");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(orders)").all() as { name: string }[])
@@ -232,7 +254,10 @@ const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
   FROM conversations c
   WHERE c.owner_phone = ?
     AND c.archived_at IS NULL
-  ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
+  ORDER BY
+    c.pinned_at DESC NULLS LAST,
+    c.last_message_at DESC NULLS LAST,
+    c.created_at DESC
 `);
 
 const stmtListArchivedConversations = db.prepare<[string], ConversationWithPreview>(`
@@ -465,4 +490,98 @@ export function unblockClient(conversationId: number): void { stmtUnblockClient.
 export function isClientBlocked(jid: string): boolean {
   const row = stmtIsBlocked.get(jid);
   return row != null && row.blocked_at != null;
+}
+
+// ─── Pinear conversaciones ────────────────────────────────────────────────────
+const stmtPinConv     = db.prepare<[number]>("UPDATE conversations SET pinned_at = unixepoch() WHERE id = ?");
+const stmtUnpinConv   = db.prepare<[number]>("UPDATE conversations SET pinned_at = NULL WHERE id = ?");
+const stmtCountPinned = db.prepare<[string], { count: number }>(
+  "SELECT COUNT(*) as count FROM conversations WHERE owner_phone = ? AND pinned_at IS NOT NULL AND archived_at IS NULL"
+);
+
+export const MAX_PINNED = 5;
+
+export function pinConversation(id: number): void   { stmtPinConv.run(id); }
+export function unpinConversation(id: number): void { stmtUnpinConv.run(id); }
+export function countPinnedConversations(ownerPhone = ""): number {
+  return stmtCountPinned.get(ownerPhone)?.count ?? 0;
+}
+
+// ─── Etiquetas personalizadas ─────────────────────────────────────────────────
+export interface Label {
+  id: number;
+  owner_phone: string;
+  name: string;
+  color: string;
+  created_at: number;
+}
+
+const stmtListLabels = db.prepare<[string], Label>(
+  "SELECT * FROM labels WHERE owner_phone = ? ORDER BY created_at ASC"
+);
+const stmtInsertLabel = db.prepare<[string, string, string], Label>(
+  "INSERT INTO labels (owner_phone, name, color) VALUES (?, ?, ?) RETURNING *"
+);
+const stmtUpdateLabel = db.prepare<[string, string, number]>(
+  "UPDATE labels SET name = ?, color = ? WHERE id = ?"
+);
+const stmtDeleteLabel = db.prepare<[number]>("DELETE FROM labels WHERE id = ?");
+const stmtGetLabelById = db.prepare<[number], Label>("SELECT * FROM labels WHERE id = ?");
+
+const stmtAttachLabel = db.prepare<[number, number]>(
+  "INSERT OR IGNORE INTO conversation_labels (conversation_id, label_id) VALUES (?, ?)"
+);
+const stmtDetachLabel = db.prepare<[number, number]>(
+  "DELETE FROM conversation_labels WHERE conversation_id = ? AND label_id = ?"
+);
+const stmtLabelsForConv = db.prepare<[number], Label>(`
+  SELECT l.* FROM labels l
+  JOIN conversation_labels cl ON cl.label_id = l.id
+  WHERE cl.conversation_id = ?
+  ORDER BY l.created_at ASC
+`);
+const stmtAllConvLabels = db.prepare<[string], Label & { conversation_id: number }>(`
+  SELECT l.*, cl.conversation_id
+  FROM labels l
+  JOIN conversation_labels cl ON cl.label_id = l.id
+  WHERE l.owner_phone = ?
+`);
+
+export function listLabels(ownerPhone = ""): Label[] {
+  return stmtListLabels.all(ownerPhone);
+}
+export function createLabel(ownerPhone: string, name: string, color: string): Label {
+  return stmtInsertLabel.all(ownerPhone, name, color)[0];
+}
+export function updateLabel(id: number, name: string, color: string): void {
+  stmtUpdateLabel.run(name, color, id);
+}
+export function deleteLabel(id: number): void {
+  stmtDeleteLabel.run(id);
+}
+export function getLabelById(id: number): Label | undefined {
+  return stmtGetLabelById.get(id);
+}
+export function attachLabelToConversation(convId: number, labelId: number): void {
+  stmtAttachLabel.run(convId, labelId);
+}
+export function detachLabelFromConversation(convId: number, labelId: number): void {
+  stmtDetachLabel.run(convId, labelId);
+}
+export function getLabelsForConversation(convId: number): Label[] {
+  return stmtLabelsForConv.all(convId);
+}
+/** Devuelve un mapa conversationId -> Label[] para todas las labels del owner.
+ * Útil para enriquecer la lista de conversaciones sin N+1 queries. */
+export function getAllConversationLabels(ownerPhone: string): Map<number, Label[]> {
+  const map = new Map<number, Label[]>();
+  for (const row of stmtAllConvLabels.all(ownerPhone)) {
+    const list = map.get(row.conversation_id) ?? [];
+    list.push({
+      id: row.id, owner_phone: row.owner_phone, name: row.name,
+      color: row.color, created_at: row.created_at
+    });
+    map.set(row.conversation_id, list);
+  }
+  return map;
 }

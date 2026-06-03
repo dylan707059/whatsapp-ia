@@ -25,10 +25,18 @@ export interface Conversation {
   blocked_at: number | null;
   owner_phone: string;
   archived_at: number | null;
+  pinned_at: number | null;
+}
+
+export interface LabelLite {
+  id: number;
+  name: string;
+  color: string;
 }
 
 export interface ConversationWithPreview extends Conversation {
   last_message_preview: string | null;
+  labels?: LabelLite[];
 }
 
 export interface Message {

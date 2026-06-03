@@ -9,8 +9,11 @@ import {
   setAiPausedUntil,
   setConversationMode,
   isClientBlocked,
-  advancePendingOutbox
+  advancePendingOutbox,
+  findRecentShopifyConversationByName,
+  deleteConversation
 } from "../db";
+import { registerContact } from "./contact-store";
 import { generateReply } from "../openai";
 import {
   isConfirmationMessage,
@@ -25,7 +28,7 @@ import {
 import { isComplaintMessage, buildComplaintAlert } from "../complaint";
 import { handleOwnerCommand } from "../commands";
 import { handleOwnerImageMessage } from "../photo-confirm-flow";
-import { getActiveOrder, upsertOrder } from "../orders";
+import { getActiveOrder } from "../orders";
 import { registerBotMessage, isBotSentMessage } from "../bot-messages";
 import { botSend } from "./send";
 import { resolvePhone } from "./contact-store";
@@ -119,9 +122,46 @@ async function processMessage(
     return;
   }
 
-  // ─── Guardar mensaje del cliente ──────────────────────────────────────────
-  const convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
+  // ─── Deduplicación de conversación por LID ────────────────────────────────
+  // Si el mensaje llega con JID @lid (formato privacy de WhatsApp) y no tenemos
+  // mapping conocido, puede que ya exista una conversación creada por el
+  // webhook de Shopify con el phone real (@s.whatsapp.net). Buscamos por
+  // pushName matching en los últimos 30 min: si encontramos un pedido SHOPIFY
+  // pendiente con el mismo nombre, reusamos esa conversación y registramos
+  // el mapping LID → phone para los próximos mensajes.
+  let convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
+  if (jid.endsWith("@lid") && pushName) {
+    const shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName);
+    if (shopifyConv && shopifyConv.id !== convo.id) {
+      console.log(
+        `[bot] LID ${jid} matchea con conv SHOPIFY #${shopifyConv.id} (${shopifyConv.phone}) ` +
+        `por pushName "${pushName}" — fusionando, descartando conv duplicada #${convo.id}`
+      );
+      // Registrar mapping para futuros mensajes
+      registerContact(shopifyConv.phone, jid);
+      // Borrar la conversación duplicada recién creada (todavía vacía)
+      try {
+        deleteConversation(convo.id);
+      } catch (err) {
+        console.error("[bot] Error borrando conv duplicada:", err);
+      }
+      convo = shopifyConv;
+    }
+  }
   insertMessage(convo.id, "user", text);
+
+  // ─── SILENCIO post-confirmación ───────────────────────────────────────────
+  // Una vez que el pedido fue confirmado (confirmed_at != null), el bot deja
+  // de hacer cualquier acción automática: ni IA, ni reclamos, ni nada.
+  // Cualquier mensaje del cliente queda guardado en el chat para que el owner
+  // lo atienda manualmente desde el dashboard.
+  {
+    const convCheck = getConversationById(convo.id);
+    if (convCheck?.confirmed_at) {
+      console.log(`[bot] Conversación ${convo.id} ya confirmada, bot en silencio`);
+      return;
+    }
+  }
 
   // ─── Adelantar outbox programado (confirmaciones Shopify diferidas) ───────
   // Si hay un mensaje pendiente con scheduled_at futuro (típicamente la
@@ -191,17 +231,10 @@ async function processMessage(
   await botSend(sock, jid, reply);
   console.log(`[bot] → Enviado a ${jid}`);
 
-  // Upsert order si el reply es una confirmación de pedido
-  if (reply.includes("🛍️")) {
-    const draftData = extractOrderData(
-      [{ id: 0, conversation_id: convo.id, role: "assistant", content: reply, created_at: 0 }],
-      convo.id
-    );
-    if (draftData) {
-      upsertOrder(convo.id, draftData, "PENDING_CONFIRMATION");
-      console.log(`[bot] Order upserted para conversación ${convo.id}`);
-    }
-  }
+  // Nota: la auto-extracción de pedido a partir del texto de la IA fue
+  // desactivada. Los pedidos ahora se crean SOLO desde el webhook de Shopify
+  // (ver /api/webhooks/shopify/orders-create). Esto evita confirmaciones
+  // duplicadas y mantiene una única fuente de verdad para los pedidos.
 }
 
 // ─── Confirmación (dentro de la cola) ────────────────────────────────────────
@@ -250,7 +283,10 @@ async function handleConfirmation(
   const missing = validateOrderData(orderData);
 
   if (missing.length > 0) {
-    if (mode === "AI") {
+    // Para pedidos SHOPIFY que ya están registrados, NO le pedimos campos
+    // faltantes al cliente (los datos vienen de Shopify, no del chat).
+    // Para pedidos viejos modo AI, sí seguimos pidiendo lo que falta.
+    if (mode === "AI" && !activeOrder) {
       const reply = `Para confirmar tu pedido, solo me falta: ${missing.join(", ")}.`;
       insertMessage(conversationId, "assistant", reply);
       await botSend(sock, jid, reply);
@@ -258,14 +294,14 @@ async function handleConfirmation(
     return;
   }
 
-  // Responder al cliente solo en AI
-  if (mode === "AI") {
-    const clientReply =
-      "Perfecto, tu pedido queda confirmado 💛\n\n" +
-      "Ya lo pasamos a despacho. Te estaremos avisando cualquier novedad por este medio.";
-    insertMessage(conversationId, "assistant", clientReply);
-    await botSend(sock, jid, clientReply);
-  }
+  // Responder al cliente confirmando (siempre, ya que el pedido es válido
+  // y el cliente acaba de decir CONFIRMADO; este es el último mensaje del
+  // bot — después queda en silencio gracias a confirmed_at)
+  const clientReply =
+    "Perfecto, tu pedido queda confirmado 💛\n\n" +
+    "Ya lo pasamos a despacho. Te estaremos avisando cualquier novedad por este medio.";
+  insertMessage(conversationId, "assistant", clientReply);
+  await botSend(sock, jid, clientReply);
 
   // Enviar notificación interna directamente (ya estamos dentro de la cola)
   const snapshot = { ...orderData };

@@ -11,9 +11,11 @@ interface Props {
   conversation: Conversation;
   onModeChange: (id: number, mode: "AI" | "HUMAN") => void;
   onDelete: (id: number) => void;
+  onArchiveToggle?: (id: number, archived: boolean) => void;
 }
 
-export default function ConversationPanel({ conversation, onModeChange, onDelete }: Props) {
+export default function ConversationPanel({ conversation, onModeChange, onDelete, onArchiveToggle }: Props) {
+  const isArchived = conversation.archived_at != null;
   const [messages, setMessages]   = useState<Message[]>([]);
   const [mode, setMode]           = useState(conversation.mode);
   const [input, setInput]         = useState("");
@@ -92,6 +94,15 @@ export default function ConversationPanel({ conversation, onModeChange, onDelete
             mode={mode}
             onToggle={handleModeToggle}
           />
+          {onArchiveToggle && (
+            <button
+              onClick={() => onArchiveToggle(conversation.id, isArchived)}
+              className="text-xs text-gray-500 hover:text-amber-600 transition-colors"
+              title={isArchived ? "Desarchivar" : "Archivar"}
+            >
+              {isArchived ? "Desarchivar" : "Archivar"}
+            </button>
+          )}
           <button
             onClick={handleDelete}
             className="text-xs text-red-400 hover:text-red-600 transition-colors"

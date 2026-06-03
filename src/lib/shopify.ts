@@ -155,8 +155,11 @@ export function toOrderData(parsed: ParsedShopifyOrder, conversationId: number):
   // Si hay varios, lo registramos así igual; el mensaje al cliente sí los lista todos.
   const first = parsed.items[0];
   const variantParts = (first?.variantTitle ?? "").split("/").map(s => s.trim()).filter(Boolean);
-  const color = variantParts[0] ?? "";
-  const size  = variantParts[1] ?? "";
+  // validateOrderData requiere color y size no vacíos para notificar al owner.
+  // Si el producto no tiene variantes, usamos "—" como placeholder en vez de
+  // dejar vacío (lo cual bloquearía la notificación).
+  const color = variantParts[0] ?? "—";
+  const size  = variantParts[1] ?? "—";
 
   return {
     conversationId,
@@ -177,11 +180,69 @@ export function toOrderData(parsed: ParsedShopifyOrder, conversationId: number):
   };
 }
 
+// ─── Validación de dirección colombiana ──────────────────────────────────────
+// Una dirección válida debe tener:
+//   (a) una nomenclatura conocida (calle, carrera, avenida, diagonal,
+//       transversal, kilómetro, autopista, vereda, manzana, etc.) o su
+//       abreviatura (cl, cll, cr, cra, krr, av, dg, tv, mz)
+//   (b) al menos un número de cuadra/casa
+// Si solo viene un nombre tipo "Las Palmas" o "Casa azul cerca al parque",
+// devolvemos false para que el bot pida la dirección completa.
+
+const ADDRESS_KEYWORDS = [
+  // Vías principales
+  "calle", "cll", "cl",
+  "carrera", "cra", "cr", "krr", "kr", "k",
+  "avenida", "av", "avda",
+  "diagonal", "dg", "diag",
+  "transversal", "tv", "trans",
+  "circular", "circ",
+  "autopista", "auto",
+  "via", "vía",
+  "anillo",
+  // Vías rurales / especiales
+  "kilometro", "kilómetro", "kilometro", "km",
+  "vereda",
+  "corregimiento",
+  "finca",
+  "lote",
+  // Unidades / sectores
+  "manzana", "mz", "mza",
+  "torre", "tr", "trre",
+  "bloque", "bl", "blq",
+  "casa",
+  "apartamento", "apto", "apt",
+  "interior", "int",
+  "edificio", "ed", "edif",
+  "conjunto", "cj",
+  "unidad", "und",
+  "etapa"
+];
+
+export function isValidColombianAddress(rawAddress: string): boolean {
+  const addr = (rawAddress || "").toLowerCase().trim();
+  if (addr.length < 6) return false;
+
+  // (a) Debe contener al menos una palabra clave de nomenclatura
+  const hasKeyword = ADDRESS_KEYWORDS.some((kw) => {
+    const pattern = new RegExp(`(^|[\\s.,#-])${kw}([\\s.,#-]|$)`, "i");
+    return pattern.test(addr);
+  });
+  if (!hasKeyword) return false;
+
+  // (b) Debe contener al menos un número
+  const hasNumber = /\d/.test(addr);
+  if (!hasNumber) return false;
+
+  return true;
+}
+
 // ─── Mensaje de confirmación al cliente (formato exacto solicitado) ───────────
 
 export function buildConfirmationMessage(parsed: ParsedShopifyOrder): string {
   const total = formatCurrency(parsed.totalPrice, parsed.currency);
   const phoneDisplay = formatPhoneForDisplay(parsed.rawPhone);
+  const addressIsValid = isValidColombianAddress(parsed.address);
 
   const itemsBlock = parsed.items
     .map((it, idx) => {
@@ -228,6 +289,10 @@ export function buildConfirmationMessage(parsed: ParsedShopifyOrder): string {
     `📌 Departamento: ${parsed.department || ""}`,
     "",
     `Por favor revisa muy bien que el teléfono ${phoneDisplay} y la dirección completa estén correctamente escritos para evitar novedades con la transportadora.`,
+    ...(addressIsValid ? [] : [
+      "",
+      "⚠️ *Importante:* Tu dirección no parece estar completa. Por favor envíanos la dirección con nomenclatura completa (Calle, Carrera, Avenida, Diagonal, Transversal, Kilómetro, etc.) seguida del número de la cuadra y casa. Ejemplo: *Calle 23 # 10-69* o *Carrera 45 # 12-34 Apto 301*."
+    ]),
     "",
     "Si todo está correcto responde *CONFIRMADO* para despachar tu pedido. Si deseas cambiar algo, escríbenos y te ayudamos de inmediato 😊"
   ].join("\n");

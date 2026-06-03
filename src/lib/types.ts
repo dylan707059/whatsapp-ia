@@ -24,6 +24,7 @@ export interface Conversation {
   ai_paused_until: number | null;
   blocked_at: number | null;
   owner_phone: string;
+  archived_at: number | null;
 }
 
 export interface ConversationWithPreview extends Conversation {
@@ -78,6 +79,10 @@ export interface Order {
   owner_notified_at: number | null;
   created_at: number;
   updated_at: number;
+  source: string | null;
+  order_hash: string | null;
+  reminder_count: number;
+  last_reminder_at: number | null;
 }
 
 // Datos estructurados extraídos del mensaje de confirmación del bot.

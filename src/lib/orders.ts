@@ -191,3 +191,70 @@ export interface TodayStats {
 export function getTodayStats(): TodayStats {
   return stmtTodayStats.get() as TodayStats;
 }
+
+// ─── Recordatorios SHOPIFY ────────────────────────────────────────────────────
+// Devuelve pedidos SHOPIFY pendientes de confirmar cuya última actividad
+// (created_at si nunca recordamos, last_reminder_at si ya recordamos) fue
+// hace más de N segundos. Limit max reminders defaults a 2.
+
+const stmtOrdersNeedingReminder = db.prepare<
+  [number, number],
+  Order & { conv_name: string | null; conv_phone: string }
+>(`
+  SELECT o.*, c.name as conv_name, c.phone as conv_phone
+  FROM orders o
+  JOIN conversations c ON o.conversation_id = c.id
+  WHERE o.source = 'SHOPIFY'
+    AND o.status = 'PENDING_CONFIRMATION'
+    AND o.reminder_count < ?
+    AND COALESCE(o.last_reminder_at, o.created_at) <= ?
+  ORDER BY o.created_at ASC
+  LIMIT 50
+`);
+
+const stmtOrdersToCancel = db.prepare<
+  [number, number],
+  Order & { conv_name: string | null; conv_phone: string }
+>(`
+  SELECT o.*, c.name as conv_name, c.phone as conv_phone
+  FROM orders o
+  JOIN conversations c ON o.conversation_id = c.id
+  WHERE o.source = 'SHOPIFY'
+    AND o.status = 'PENDING_CONFIRMATION'
+    AND o.reminder_count >= ?
+    AND COALESCE(o.last_reminder_at, o.created_at) <= ?
+  LIMIT 50
+`);
+
+const stmtIncrementReminder = db.prepare<[number]>(
+  "UPDATE orders SET reminder_count = reminder_count + 1, last_reminder_at = unixepoch(), updated_at = unixepoch() WHERE id = ?"
+);
+
+/**
+ * Pedidos SHOPIFY que necesitan un recordatorio ahora.
+ * @param maxReminders cantidad máxima de recordatorios por pedido (default 2)
+ * @param intervalSec  segundos mínimos entre recordatorios (default 7200 = 2h)
+ */
+export function getOrdersNeedingReminder(
+  maxReminders = 2,
+  intervalSec = 7200
+): Array<Order & { conv_name: string | null; conv_phone: string }> {
+  const threshold = Math.floor(Date.now() / 1000) - intervalSec;
+  return stmtOrdersNeedingReminder.all(maxReminders, threshold);
+}
+
+/**
+ * Pedidos SHOPIFY que ya recibieron el máximo de recordatorios y pasó
+ * el intervalo final sin confirmación — listos para cancelar.
+ */
+export function getOrdersToAutoCancel(
+  maxReminders = 2,
+  intervalSec = 7200
+): Array<Order & { conv_name: string | null; conv_phone: string }> {
+  const threshold = Math.floor(Date.now() / 1000) - intervalSec;
+  return stmtOrdersToCancel.all(maxReminders, threshold);
+}
+
+export function incrementReminderCount(orderId: number): void {
+  stmtIncrementReminder.run(orderId);
+}

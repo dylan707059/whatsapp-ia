@@ -10,10 +10,12 @@ import ConversationPanel from "./ConversationPanel";
 type AppStatus = "loading" | "qr" | "connected";
 
 export default function ConnectionGate() {
-  const [appStatus, setAppStatus]       = useState<AppStatus>("loading");
-  const [connectedPhone, setConnected]  = useState<string>("");
+  const [appStatus, setAppStatus]         = useState<AppStatus>("loading");
+  const [connectedPhone, setConnected]    = useState<string>("");
   const [conversations, setConversations] = useState<ConversationWithPreview[]>([]);
-  const [selectedId, setSelectedId]     = useState<number | null>(null);
+  const [archivedCount, setArchivedCount] = useState<number>(0);
+  const [showArchived, setShowArchived]   = useState<boolean>(false);
+  const [selectedId, setSelectedId]       = useState<number | null>(null);
 
   // Polling de estado: mientras no esté conectado verifica cada 2s
   useEffect(() => {
@@ -31,7 +33,8 @@ export default function ConnectionGate() {
     fetchConversations();
     const timer = setInterval(fetchConversations, 2000);
     return () => clearInterval(timer);
-  }, [appStatus]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appStatus, showArchived]);
 
   async function checkStatus() {
     try {
@@ -50,8 +53,18 @@ export default function ConnectionGate() {
 
   async function fetchConversations() {
     try {
-      const res = await fetch("/api/conversations");
-      if (res.ok) setConversations(await res.json());
+      const url = showArchived
+        ? "/api/conversations?archived=true"
+        : "/api/conversations";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json() as {
+        conversations: ConversationWithPreview[];
+        archivedCount: number;
+        showingArchived: boolean;
+      };
+      setConversations(data.conversations);
+      setArchivedCount(data.archivedCount);
     } catch {}
   }
 
@@ -76,6 +89,20 @@ export default function ConnectionGate() {
     if (selectedId === id) setSelectedId(null);
   }
 
+  async function handleArchiveToggle(id: number, archived: boolean) {
+    try {
+      const action = archived ? "unarchive" : "archive";
+      await fetch(`/api/conversations/${id}/${action}`, { method: "POST" });
+      // Quitar de la lista actual (cambia de pestaña)
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      // Refrescar contador
+      fetchConversations();
+    } catch (err) {
+      console.error("Error toggling archive:", err);
+    }
+  }
+
   if (appStatus === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -96,10 +123,22 @@ export default function ConnectionGate() {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-72 flex flex-col border-r border-gray-200 bg-white">
-          <div className="px-4 py-3 border-b border-gray-100">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Conversaciones
+              {showArchived ? "Archivados" : "Conversaciones"}
             </h2>
+            <button
+              type="button"
+              onClick={() => { setSelectedId(null); setShowArchived((v) => !v); }}
+              className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
+                showArchived
+                  ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+              title={showArchived ? "Volver a activos" : "Ver archivados"}
+            >
+              {showArchived ? "← Activos" : `Archivados${archivedCount > 0 ? ` (${archivedCount})` : ""}`}
+            </button>
           </div>
           <ConversationList
             conversations={conversations}
@@ -114,6 +153,7 @@ export default function ConnectionGate() {
               conversation={selectedConversation}
               onModeChange={handleModeChange}
               onDelete={handleDelete}
+              onArchiveToggle={handleArchiveToggle}
             />
           ) : (
             <div className="h-full flex items-center justify-center">

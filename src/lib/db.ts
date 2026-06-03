@@ -49,6 +49,7 @@ db.exec(`
     owner_notified_at INTEGER,
     ai_paused_until  INTEGER,
     blocked_at       INTEGER,
+    archived_at      INTEGER,
     UNIQUE(phone, owner_phone)
   );
 
@@ -177,12 +178,15 @@ db.exec(`
   if (!cols.includes("ai_paused_until"))   db.exec("ALTER TABLE conversations ADD COLUMN ai_paused_until INTEGER");
   if (!cols.includes("blocked_at"))        db.exec("ALTER TABLE conversations ADD COLUMN blocked_at INTEGER");
   if (!cols.includes("owner_phone"))       db.exec("ALTER TABLE conversations ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes("archived_at"))       db.exec("ALTER TABLE conversations ADD COLUMN archived_at INTEGER");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(orders)").all() as { name: string }[])
     .map(c => c.name);
-  if (!cols.includes("source"))     db.exec("ALTER TABLE orders ADD COLUMN source TEXT");
-  if (!cols.includes("order_hash")) db.exec("ALTER TABLE orders ADD COLUMN order_hash TEXT");
+  if (!cols.includes("source"))           db.exec("ALTER TABLE orders ADD COLUMN source TEXT");
+  if (!cols.includes("order_hash"))       db.exec("ALTER TABLE orders ADD COLUMN order_hash TEXT");
+  if (!cols.includes("reminder_count"))   db.exec("ALTER TABLE orders ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0");
+  if (!cols.includes("last_reminder_at")) db.exec("ALTER TABLE orders ADD COLUMN last_reminder_at INTEGER");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(photo_confirm_sessions)").all() as { name: string }[])
@@ -227,8 +231,28 @@ const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
      ORDER BY created_at DESC LIMIT 1) AS last_message_preview
   FROM conversations c
   WHERE c.owner_phone = ?
+    AND c.archived_at IS NULL
   ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
 `);
+
+const stmtListArchivedConversations = db.prepare<[string], ConversationWithPreview>(`
+  SELECT
+    c.*,
+    (SELECT content FROM messages
+     WHERE conversation_id = c.id
+     ORDER BY created_at DESC LIMIT 1) AS last_message_preview
+  FROM conversations c
+  WHERE c.owner_phone = ?
+    AND c.archived_at IS NOT NULL
+  ORDER BY c.archived_at DESC
+`);
+
+const stmtCountArchived = db.prepare<[string], { count: number }>(
+  "SELECT COUNT(*) as count FROM conversations WHERE owner_phone = ? AND archived_at IS NOT NULL"
+);
+
+const stmtArchiveConv   = db.prepare<[number]>("UPDATE conversations SET archived_at = unixepoch() WHERE id = ?");
+const stmtUnarchiveConv = db.prepare<[number]>("UPDATE conversations SET archived_at = NULL WHERE id = ?");
 
 export function getOrCreateConversation(phone: string, name?: string | null, ownerPhone = ""): Conversation {
   const existing = stmtGetConvByPhone.get(phone, ownerPhone);
@@ -246,6 +270,18 @@ export function getConversationById(id: number): Conversation | undefined {
 }
 export function listConversations(ownerPhone = ""): ConversationWithPreview[] {
   return stmtListConversations.all(ownerPhone);
+}
+export function listArchivedConversations(ownerPhone = ""): ConversationWithPreview[] {
+  return stmtListArchivedConversations.all(ownerPhone);
+}
+export function countArchivedConversations(ownerPhone = ""): number {
+  return stmtCountArchived.get(ownerPhone)?.count ?? 0;
+}
+export function archiveConversation(id: number): void {
+  stmtArchiveConv.run(id);
+}
+export function unarchiveConversation(id: number): void {
+  stmtUnarchiveConv.run(id);
 }
 export function setMode(conversationId: number, mode: ConversationMode): void {
   stmtSetMode.run(mode, conversationId);
@@ -350,6 +386,38 @@ export function markOutboxSent(id: number): void {
 export function advancePendingOutbox(conversationId: number): number {
   const result = stmtAdvancePending.run(conversationId);
   return result.changes;
+}
+
+// Buscar conversación reciente con orden SHOPIFY pendiente y matching de nombre
+// Se usa para deduplicar cuando un mensaje llega con JID @lid (que no matchea
+// la conv creada por el webhook Shopify con @s.whatsapp.net).
+const stmtFindShopifyByName = db.prepare<
+  [string, string, number],
+  Conversation
+>(`
+  SELECT c.*
+  FROM conversations c
+  WHERE c.owner_phone = ?
+    AND LOWER(c.name) = LOWER(?)
+    AND c.created_at >= ?
+    AND EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.conversation_id = c.id
+        AND o.source = 'SHOPIFY'
+        AND o.status = 'PENDING_CONFIRMATION'
+    )
+  ORDER BY c.created_at DESC
+  LIMIT 1
+`);
+
+export function findRecentShopifyConversationByName(
+  ownerPhone: string,
+  name: string,
+  withinSeconds = 1800
+): Conversation | undefined {
+  if (!name) return undefined;
+  const since = Math.floor(Date.now() / 1000) - withinSeconds;
+  return stmtFindShopifyByName.get(ownerPhone, name, since);
 }
 
 // Borrar conversación

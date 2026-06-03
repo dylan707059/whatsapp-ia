@@ -129,76 +129,9 @@ Se alcanzó el límite de uso. Opciones:
 - Agregar créditos en [platform.openai.com/billing](https://platform.openai.com/billing)
 - Revisar el uso en el panel de OpenAI
 
-## Flujo seguro de /fotoconfirmar
+## Comandos del owner
 
-Para confirmar pedidos desde capturas de pantalla. **Solo disponible para números en `OWNER_NOTIFY_PHONES`.**
-
-### Principio base
-
-- Si OpenAI está seguro y todos los datos están completos → envía la confirmación al cliente automáticamente.
-- Si tiene dudas, si faltan datos, si hay varios teléfonos posibles o si el pedido parece duplicado → **no envía al cliente** y pide revisión al owner.
-
-### Flujo completo
-
-```
-1. Escribir:
-   /fotoconfirmar
-
-2. Enviar las fotos del pedido (1 a 4 imágenes JPG, PNG o WEBP).
-
-3. Escribir:
-   /listo
-
-4. Si la IA está segura (confidence = high) y no hay duplicado:
-   → Envía confirmación al cliente automáticamente.
-
-5. Si la IA tiene dudas (confidence = medium o low):
-   → Muestra VISTA PREVIA al owner. El cliente NO recibe nada todavía.
-
-6. Para corregir un dato:
-   /editar campo valor
-   Ejemplo: /editar talla M
-
-7. Para aprobar y enviar al cliente:
-   /enviarconfirmacion
-
-8. Para reenviar una confirmación ya enviada:
-   /reenviarconfirmacion 3147823790
-
-9. Si se detecta un pedido duplicado (mismo contenido ya existe):
-   → Muestra aviso. Para reemplazar el anterior:
-   /reemplazar
-
-10. Para cancelar en cualquier momento:
-    /cancelar
-```
-
-### Comandos de /fotoconfirmar
-
-| Comando | Descripción |
-|---------|-------------|
-| `/fotoconfirmar [TELEFONO]` | Inicia sesión. El teléfono es opcional si está en las fotos |
-| `/listo` | Procesa las fotos enviadas |
-| `/cancelar` | Cancela la sesión activa |
-| `/estadofoto` | Muestra estado y cantidad de fotos |
-| `/usartelefono N` | Elige el teléfono cuando la IA detectó varios |
-| `/editar campo valor` | Corrige un dato del pedido en revisión |
-| `/enviarconfirmacion` | Aprueba y envía la confirmación al cliente |
-| `/reenviarconfirmacion TELEFONO` | Reenvía la confirmación a un cliente que no respondió |
-| `/reemplazar` | Cancela el pedido duplicado y procede con el nuevo |
-
-### Campos editables con /editar
-
-`nombre`, `apellido`, `telefono`, `producto`, `color`, `talla`, `cantidad`, `total`, `pago`, `envio`, `direccion`, `ciudad`, `departamento`
-
-```
-/editar nombre Claudia Marcela Herrera
-/editar talla M
-/editar direccion Calle 10 # 5-20 barrio Centro
-/editar ciudad Apartadó
-```
-
-### Comandos de gestión adicionales
+**Solo disponibles para números en `OWNER_NOTIFY_PHONES`.** Cualquier otro número que envíe un comando es ignorado.
 
 | Comando | Descripción |
 |---------|-------------|
@@ -212,7 +145,6 @@ Para confirmar pedidos desde capturas de pantalla. **Solo disponible para númer
 ### Seguridad y control
 
 - Solo `OWNER_NOTIFY_PHONES` puede usar comandos internos. Cualquier otro número que envíe un comando es ignorado.
-- Las fotos son temporales (`./data/tmp/fotoconfirmar/`) y se borran al terminar.
 - Detección de pedidos duplicados por hash de contenido (teléfono + producto + datos de envío).
 - Cola global FIFO: un pedido se procesa completamente antes de empezar el siguiente.
 - Bloqueo por cliente: evita procesos cruzados del mismo número.
@@ -286,8 +218,8 @@ bloqueo Baileys).
 
 ### Anti-duplicados
 
-El endpoint usa `computeOrderHash()` (mismo que el flujo `/fotoconfirmar`)
-para detectar si el mismo pedido ya fue procesado. Si Shopify reenvía el
+El endpoint usa `computeOrderHash()` para detectar si el mismo pedido ya
+fue procesado. Si Shopify reenvía el
 webhook por reintento, el segundo intento responde `200 OK skipped=duplicate`
 sin reenviar el mensaje al cliente.
 

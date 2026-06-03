@@ -115,51 +115,6 @@ export interface OrderData {
   department: string;
 }
 
-export type PhotoSessionStatus =
-  | "WAITING_IMAGES"
-  | "QUEUED"
-  | "PROCESSING"
-  | "NEEDS_PHONE_SELECTION"
-  | "PREVIEW"
-  | "AWAITING_REPLACE_DECISION"
-  | "COMPLETED"
-  | "CANCELLED"
-  | "EXPIRED"
-  | "ERROR";
-
-export interface PhotoConfirmSession {
-  id: number;
-  owner_phone: string;
-  target_phone: string | null;
-  status: PhotoSessionStatus;
-  image_paths: string;           // JSON array de rutas de archivo
-  extracted_order_json: string | null;
-  detected_phones_json: string | null;
-  duplicate_order_id: number | null;
-  created_at: number;
-  expires_at: number;
-}
-
-export interface ExtractedPhotoOrder {
-  fullName: string;
-  firstName: string;
-  lastName: string;
-  phone: string;
-  detectedPhones: string[];
-  product: string;
-  color: string;
-  size: string;
-  quantity: string;
-  total: string;
-  payment: string;
-  shipping: string;
-  address: string;
-  city: string;
-  department: string;
-  confidence: "high" | "medium" | "low";
-  missingFields: string[];
-}
-
 /**
  * Extrae la parte legible de un JID de WhatsApp para mostrar en la UI.
  * "573019230332@s.whatsapp.net" → "573019230332"

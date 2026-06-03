@@ -10,7 +10,6 @@ export const AUTH_DIR: string = process.env.AUTH_DIR
   : path.resolve(process.cwd(), "auth");
 
 export const DB_PATH       = path.join(DATA_DIR, "messages.db");
-export const TMP_ROOT      = path.join(DATA_DIR, "tmp", "fotoconfirmar");
 export const RESTART_FLAG  = path.join(DATA_DIR, ".restart");
 
 // Crear directorios necesarios al importar este módulo

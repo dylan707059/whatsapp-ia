@@ -78,7 +78,7 @@ function buildCopyMessage(data: OrderData, orderId?: number): string {
 }
 
 // ─── Cola unificada ───────────────────────────────────────────────────────────
-// Redirige a la cola global FIFO para no mezclar con /fotoconfirmar y confirmaciones.
+// Redirige a la cola global FIFO para no mezclar con las confirmaciones.
 
 export function enqueueOwnerNotification(
   sock: WASocket,

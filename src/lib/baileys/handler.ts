@@ -27,7 +27,6 @@ import {
 } from "../owner-notifier";
 import { isComplaintMessage, buildComplaintAlert } from "../complaint";
 import { handleOwnerCommand } from "../commands";
-import { handleOwnerImageMessage } from "../photo-confirm-flow";
 import { getActiveOrder } from "../orders";
 import { registerBotMessage, isBotSentMessage } from "../bot-messages";
 import { botSend } from "./send";
@@ -102,14 +101,8 @@ async function processMessage(
     console.log(`[handler] LID sin resolver: ${jid} → senderPhone=${senderPhone} | pushName=${msg.pushName} | ownerPhones=${ownerPhones.join(",")}`);
   }
 
-  // ─── Imágenes (solo procesar las de owners para /fotoconfirmar) ───────────
-  const imageMsg = msg.message?.imageMessage;
-  if (imageMsg) {
-    if (isOwner) {
-      await handleOwnerImageMessage(sock, jid, senderPhone, msg);
-    }
-    return; // No-owners: ignorar imágenes
-  }
+  // ─── Imágenes: se ignoran (los pedidos entran por el webhook de Shopify) ──
+  if (msg.message?.imageMessage) return;
 
   // ─── Extraer texto ────────────────────────────────────────────────────────
   const text: string | undefined =

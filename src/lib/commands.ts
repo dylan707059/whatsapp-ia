@@ -9,17 +9,6 @@ import { getOrderByPhone, getTodayStats } from "./orders";
 import { botSend } from "./baileys/send";
 import { normalizePhone, phoneForDisplay, phoneToJid } from "./phone-utils";
 import { logAudit } from "./audit";
-import {
-  cmdFotoConfirmar,
-  cmdListo,
-  cmdCancelar,
-  cmdEstadoFoto,
-  cmdUsarTelefono,
-  cmdEditar,
-  cmdEnviarConfirmacion,
-  cmdReenviarConfirmacion,
-  cmdReemplazar
-} from "./photo-confirm-flow";
 
 // ─── Router de comandos ───────────────────────────────────────────────────────
 
@@ -58,43 +47,6 @@ export async function handleOwnerCommand(
       await cmdDesbloquear(sock, fromJid, ownerPhone, arg);
       break;
 
-    // Comandos de /fotoconfirmar
-    case "/fotoconfirmar":
-      await cmdFotoConfirmar(sock, fromJid, ownerPhone, arg);
-      break;
-
-    case "/listo":
-      await cmdListo(sock, fromJid, ownerPhone);
-      break;
-
-    case "/cancelar":
-      await cmdCancelar(sock, fromJid, ownerPhone);
-      break;
-
-    case "/estadofoto":
-      await cmdEstadoFoto(sock, fromJid, ownerPhone);
-      break;
-
-    case "/usartelefono":
-      await cmdUsarTelefono(sock, fromJid, ownerPhone, arg);
-      break;
-
-    case "/editar":
-      await cmdEditar(sock, fromJid, ownerPhone, arg);
-      break;
-
-    case "/enviarconfirmacion":
-      await cmdEnviarConfirmacion(sock, fromJid, ownerPhone);
-      break;
-
-    case "/reenviarconfirmacion":
-      await cmdReenviarConfirmacion(sock, fromJid, ownerPhone, arg);
-      break;
-
-    case "/reemplazar":
-      await cmdReemplazar(sock, fromJid, ownerPhone);
-      break;
-
     default:
       await botSend(sock, fromJid, [
         "Comandos disponibles:",
@@ -103,17 +55,7 @@ export async function handleOwnerCommand(
         "/humano TELEFONO",
         "/ia TELEFONO",
         "/bloquear TELEFONO",
-        "/desbloquear TELEFONO",
-        "",
-        "/fotoconfirmar [TELEFONO]",
-        "/listo",
-        "/cancelar",
-        "/estadofoto",
-        "/usartelefono N",
-        "/editar campo valor",
-        "/enviarconfirmacion",
-        "/reenviarconfirmacion TELEFONO",
-        "/reemplazar"
+        "/desbloquear TELEFONO"
       ].join("\n"));
   }
 }

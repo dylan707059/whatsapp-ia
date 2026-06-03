@@ -20,6 +20,8 @@ interface Props {
   unreadCount?: number;
   ownerPhone: string;
   onDisconnect: () => void;
+  onOpenSettings?: () => void;
+  onLogout?: () => void;
   onLabelFilter?: (labelId: number | null) => void;
   activeLabelFilter?: number | null;
 }
@@ -133,31 +135,60 @@ export default function Sidebar(props: Props) {
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Configuración */}
+      {props.onOpenSettings && (
+        <FooterButton icon="⚙️" label="Configuración" onClick={props.onOpenSettings} />
+      )}
+
       {/* Disconnect */}
-      <button
+      <FooterButton
+        icon="⏻"
+        label="Desconectar WhatsApp"
         onClick={props.onDisconnect}
-        style={{
-          padding: "6px 12px",
-          color: "var(--text-muted)",
-          fontSize: 13,
-          textAlign: "left",
-          borderRadius: "var(--radius)",
-          transition: "all 0.12s",
-          display: "flex", alignItems: "center", gap: 10
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--bg-hover)";
-          e.currentTarget.style.color = "var(--danger)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.color = "var(--text-muted)";
-        }}
-      >
-        <span style={{ width: 16, opacity: 0.7 }}>⏻</span>
-        Desconectar WhatsApp
-      </button>
+        dangerHover
+      />
+
+      {/* Cerrar sesión */}
+      {props.onLogout && (
+        <FooterButton icon="🚪" label="Cerrar sesión" onClick={props.onLogout} />
+      )}
     </nav>
+  );
+}
+
+function FooterButton({
+  icon, label, onClick, dangerHover
+}: {
+  icon: string;
+  label: string;
+  onClick?: () => void;
+  dangerHover?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%",
+        padding: "6px 12px",
+        color: "var(--text-muted)",
+        fontSize: 13,
+        textAlign: "left",
+        borderRadius: "var(--radius)",
+        transition: "all 0.12s",
+        display: "flex", alignItems: "center", gap: 10
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--bg-hover)";
+        e.currentTarget.style.color = dangerHover ? "var(--danger)" : "var(--text)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--text-muted)";
+      }}
+    >
+      <span style={{ width: 16, opacity: 0.7 }}>{icon}</span>
+      {label}
+    </button>
   );
 }
 

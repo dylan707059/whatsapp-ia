@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
 import SettingsScreen from "./SettingsScreen";
@@ -21,17 +22,17 @@ export default function ConnectionGate() {
   const [selectedId, setSelectedId]       = useState<number | null>(null);
   const [search, setSearch]               = useState<string>("");
   const [labelFilter, setLabelFilter]     = useState<number | null>(null);
-  // null = aún consultando si la cuenta ya configuró; true = debe configurar.
-  const [needsSettings, setNeedsSettings] = useState<boolean | null>(null);
+  // Pantalla de configuración: se abre con el botón ⚙️ del menú lateral.
+  const [showSettings, setShowSettings]   = useState<boolean>(false);
 
-  // Al montar, verificar si la cuenta ya guardó su configuración. Si no, se
-  // muestra la pantalla de configuración ANTES de conectar WhatsApp.
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((d) => setNeedsSettings(!d.configured))
-      .catch(() => setNeedsSettings(false)); // ante error, no bloquear el acceso
-  }, []);
+  const router = useRouter();
+
+  async function handleLogout() {
+    if (!confirm("¿Cerrar sesión?")) return;
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch {}
+    router.push("/login");
+    router.refresh();
+  }
 
   // Estado de conexión: polling mientras NO conectados (necesitamos el QR);
   // cuando conectados, dependemos del evento SSE "conn" que llega abajo.
@@ -158,7 +159,7 @@ export default function ConnectionGate() {
     });
   }, [conversations, search, labelFilter]);
 
-  if (appStatus === "loading" || needsSettings === null) {
+  if (appStatus === "loading") {
     return (
       <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--bg)" }}>
         <div
@@ -175,9 +176,9 @@ export default function ConnectionGate() {
     );
   }
 
-  // Configuración antes de conectar WhatsApp (onboarding).
-  if (needsSettings) {
-    return <SettingsScreen onSaved={() => setNeedsSettings(false)} />;
+  // Pantalla de configuración (se abre desde el botón ⚙️; "Volver" la cierra).
+  if (showSettings) {
+    return <SettingsScreen allowSkip onSaved={() => setShowSettings(false)} />;
   }
 
   if (appStatus === "qr") {
@@ -204,6 +205,8 @@ export default function ConnectionGate() {
         pinnedCount={pinnedCount}
         ownerPhone={connectedPhone}
         onDisconnect={handleDisconnect}
+        onOpenSettings={() => setShowSettings(true)}
+        onLogout={handleLogout}
         onLabelFilter={setLabelFilter}
         activeLabelFilter={labelFilter}
       />

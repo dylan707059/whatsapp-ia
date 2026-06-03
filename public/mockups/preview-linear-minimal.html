@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mockup · Linear Minimal</title>
+<style>
+  :root {
+    --accent: #5e6ad2;
+    --accent-soft: rgba(94, 106, 210, 0.14);
+    --accent-glow: rgba(94, 106, 210, 0.4);
+    --radius: 6px;
+    --radius-sm: 4px;
+    --font: "Inter", "SF Pro Text", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #08090a;
+    --bg-elev: #0c0d0f;
+    --bg-elev-2: #131418;
+    --bg-hover: #1a1b1f;
+    --bg-active: #1f2027;
+    --border: #1f1f25;
+    --border-strong: #2a2a32;
+    --text: #f4f4f5;
+    --text-muted: #94949a;
+    --text-dim: #5d5d65;
+    --bubble-out: #1f2027;
+    --bubble-in: #131418;
+    --bubble-system: #131418;
+  }
+  [data-theme="light"] {
+    --bg: #fcfcfd;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #f5f6f8;
+    --bg-hover: #f0f1f4;
+    --bg-active: #ebecf0;
+    --border: #e6e7ec;
+    --border-strong: #d2d4dc;
+    --text: #0a0a0b;
+    --text-muted: #585864;
+    --text-dim: #8e8e98;
+    --bubble-out: #f0f1f4;
+    --bubble-in: #ffffff;
+    --bubble-system: #f5f6f8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13.5px;
+    font-feature-settings: "cv11", "ss01";
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+    letter-spacing: -0.005em;
+  }
+
+  .app { display: grid; grid-template-columns: 240px 320px 1fr; height: 100vh; }
+
+  /* Sidebar (más wide tipo Linear) */
+  .nav {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 14px 10px;
+  }
+  .org {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; border-radius: var(--radius);
+    cursor: pointer; margin-bottom: 12px;
+  }
+  .org:hover { background: var(--bg-hover); }
+  .org-icon {
+    width: 22px; height: 22px; border-radius: 5px;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-weight: 600; font-size: 12px;
+  }
+  .org-name { font-weight: 600; font-size: 14px; flex: 1; }
+  .org-chev { color: var(--text-dim); font-size: 11px; }
+
+  .nav-section { margin-top: 12px; }
+  .nav-section-title {
+    padding: 4px 12px 4px;
+    font-size: 11px; color: var(--text-dim); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .nav-item {
+    padding: 6px 12px;
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius);
+    font-size: 13.5px;
+    font-weight: 500;
+    transition: all 0.12s;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { background: var(--bg-active); color: var(--text); }
+  .nav-item .ico { width: 16px; opacity: 0.7; }
+  .nav-item .count {
+    margin-left: auto;
+    background: var(--bg-elev-2);
+    color: var(--text-muted);
+    font-size: 11px; padding: 0 6px; border-radius: 4px; min-width: 16px;
+    text-align: center;
+  }
+  .nav-item.active .count { background: var(--accent-soft); color: var(--accent); }
+
+  .nav-label-row {
+    padding: 6px 12px;
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-muted); cursor: pointer;
+    border-radius: var(--radius);
+    font-size: 13.5px;
+    transition: all 0.12s;
+  }
+  .nav-label-row:hover { background: var(--bg-hover); color: var(--text); }
+  .label-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .label-dot.green { background: #46d39a; }
+  .label-dot.amber { background: #ffb547; }
+  .label-dot.violet { background: #a78bfa; }
+  .label-dot.rose { background: #f472b6; }
+
+  /* Chat list */
+  .list {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .list-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .list-head h1 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
+  .icon-btn {
+    width: 26px; height: 26px; border-radius: var(--radius);
+    display: grid; place-items: center;
+    color: var(--text-muted); cursor: pointer; font-size: 13px;
+    background: transparent; border: 0;
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+  .search {
+    margin: 8px 12px 0;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-dim); font-size: 13px;
+  }
+  .search input {
+    flex: 1; background: transparent; border: 0; outline: 0;
+    color: var(--text); font-size: 13px; font-family: var(--font);
+  }
+  .search .kbd {
+    font-size: 10px; color: var(--text-dim);
+    padding: 1px 5px; border: 1px solid var(--border);
+    border-radius: 3px; background: var(--bg-elev);
+  }
+
+  .filters { display: flex; gap: 4px; padding: 8px 12px; }
+  .chip {
+    padding: 3px 9px; border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .chip:hover { background: var(--bg-hover); }
+  .chip.active { background: var(--accent-soft); color: var(--accent); }
+
+  .section-label {
+    padding: 12px 16px 4px;
+    font-size: 10.5px; letter-spacing: 0.05em;
+    color: var(--text-dim); text-transform: uppercase;
+    font-weight: 600;
+  }
+  .list-scroll { flex: 1; overflow-y: auto; }
+  .chat-row {
+    padding: 9px 14px;
+    display: flex; gap: 11px; cursor: pointer;
+    align-items: center;
+    border-left: 2px solid transparent;
+  }
+  .chat-row:hover { background: var(--bg-hover); }
+  .chat-row.active {
+    background: var(--bg-active);
+    border-left-color: var(--accent);
+  }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 6px;
+    display: grid; place-items: center;
+    color: #fff; font-weight: 600; font-size: 12px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #4a4a55, #2c2c34);
+  }
+  .avatar.accent { background: linear-gradient(135deg, var(--accent), #4751b8); }
+  .avatar.green { background: linear-gradient(135deg, #46d39a, #2da776); }
+  .avatar.rose { background: linear-gradient(135deg, #f472b6, #c83a8e); }
+  .avatar.amber { background: linear-gradient(135deg, #ffb547, #c98326); }
+
+  .chat-body { flex: 1; min-width: 0; }
+  .chat-line1 {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 2px;
+  }
+  .chat-name {
+    font-weight: 600; font-size: 13.5px; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chat-time { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+  .chat-line2 { display: flex; align-items: center; gap: 8px; }
+  .chat-preview {
+    flex: 1; min-width: 0;
+    color: var(--text-muted); font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chat-unread {
+    background: var(--accent); color: #fff;
+    border-radius: 999px; padding: 0 5px;
+    font-size: 10.5px; font-weight: 600; min-width: 16px; text-align: center;
+  }
+  .chat-pin { color: var(--text-dim); font-size: 10px; }
+  .chat-labels { display: flex; gap: 4px; margin-top: 3px; }
+  .label-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    font-weight: 500; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .label-badge.confirm { background: rgba(70, 211, 154, 0.14); color: #46d39a; }
+  .label-badge.pending { background: rgba(255, 181, 71, 0.14); color: #ffb547; }
+  .label-badge.vip { background: rgba(167, 139, 250, 0.18); color: #a78bfa; }
+
+  /* Panel */
+  .panel { display: flex; flex-direction: column; background: var(--bg); }
+  .panel-head {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .panel-head .info { flex: 1; }
+  .panel-head .name { font-weight: 600; font-size: 14px; }
+  .panel-head .meta { font-size: 12px; color: var(--text-muted); }
+  .panel-actions { display: flex; gap: 2px; }
+
+  .order-card {
+    margin: 14px 20px 6px;
+    padding: 10px 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12.5px;
+  }
+  .order-card .pill {
+    padding: 2px 8px; border-radius: 3px;
+    font-size: 10.5px; font-weight: 600;
+    background: rgba(255, 181, 71, 0.14); color: #ffb547;
+  }
+  .order-card .b { color: var(--text); font-weight: 600; }
+  .order-card .item { color: var(--text-muted); }
+
+  .messages {
+    flex: 1; overflow-y: auto;
+    padding: 14px 20px 18px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .bubble {
+    max-width: 58%;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    font-size: 13.5px; line-height: 1.5;
+    word-wrap: break-word; position: relative;
+  }
+  .bubble.out {
+    align-self: flex-end;
+    background: var(--bubble-out);
+    border: 1px solid var(--border);
+  }
+  .bubble.in {
+    align-self: flex-start;
+    background: var(--bubble-in);
+    border: 1px solid var(--border);
+  }
+  .bubble .time {
+    font-size: 10.5px; color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .system-line {
+    align-self: center;
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 10px;
+  }
+
+  .composer {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .composer-input {
+    flex: 1;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 7px 12px;
+    color: var(--text); font-size: 13.5px; font-family: var(--font);
+    outline: 0;
+  }
+  .composer-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .send-btn {
+    padding: 6px 12px; height: 30px;
+    background: var(--accent); color: #fff;
+    border: 0; border-radius: var(--radius);
+    cursor: pointer; font-size: 12.5px; font-weight: 600;
+    font-family: var(--font);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .send-btn .kbd { font-size: 10px; opacity: 0.7; padding: 0 4px; background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+  .theme-toggle {
+    position: fixed; top: 10px; right: 16px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 5px 12px;
+    color: var(--text); cursor: pointer; font-size: 12px;
+    font-family: var(--font); z-index: 100;
+  }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">Cambiar tema</button>
+
+<div class="app">
+  <nav class="nav">
+    <div class="org">
+      <div class="org-icon">E</div>
+      <div class="org-name">Eclipse</div>
+      <div class="org-chev">⌄</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item active"><span class="ico">💬</span>Chats <span class="count">12</span></div>
+      <div class="nav-item"><span class="ico">📌</span>Fijados <span class="count">2</span></div>
+      <div class="nav-item"><span class="ico">🔔</span>No leídos <span class="count">4</span></div>
+      <div class="nav-item"><span class="ico">📁</span>Archivados</div>
+      <div class="nav-item"><span class="ico">📊</span>Pedidos hoy</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Etiquetas</div>
+      <div class="nav-label-row"><span class="label-dot violet"></span>VIP</div>
+      <div class="nav-label-row"><span class="label-dot amber"></span>Por despachar</div>
+      <div class="nav-label-row"><span class="label-dot green"></span>Confirmado</div>
+      <div class="nav-label-row"><span class="label-dot rose"></span>Problema</div>
+      <div class="nav-label-row" style="color: var(--text-dim);"><span class="ico">＋</span>Nueva etiqueta</div>
+    </div>
+
+    <div style="flex:1"></div>
+
+    <div class="nav-section">
+      <div class="nav-item"><span class="ico">⚙️</span>Ajustes</div>
+    </div>
+  </nav>
+
+  <aside class="list">
+    <div class="list-head">
+      <h1>Mensajes</h1>
+      <button class="icon-btn">＋</button>
+      <button class="icon-btn">⋯</button>
+    </div>
+    <div class="search">
+      <span>🔍</span>
+      <input placeholder="Buscar..." />
+      <span class="kbd">⌘K</span>
+    </div>
+    <div class="filters">
+      <button class="chip active">Todos</button>
+      <button class="chip">Pendientes</button>
+      <button class="chip">Hoy</button>
+    </div>
+
+    <div class="list-scroll">
+      <div class="section-label">Fijados</div>
+
+      <div class="chat-row">
+        <div class="avatar accent">E</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Mensajes guardados</span>
+            <span class="chat-pin">📌</span>
+            <span class="chat-time">12:34</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Tracking: trans-9012-XX</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row active">
+        <div class="avatar rose">LC</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Lizeth Castro</span>
+            <span class="chat-pin">📌</span>
+            <span class="chat-time">21:14</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">CONFIRMADO</span>
+            <span class="chat-unread">2</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge vip"><span class="label-dot violet" style="width:6px;height:6px;"></span>VIP</span>
+            <span class="label-badge pending">Por despachar</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">Recientes</div>
+
+      <div class="chat-row">
+        <div class="avatar green">MG</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">María González</span>
+            <span class="chat-time">20:48</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">¿Cuándo me llega el pedido?</span>
+            <span class="chat-unread">1</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge confirm">Confirmado</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row">
+        <div class="avatar amber">JP</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Juan Pablo Ríos</span>
+            <span class="chat-time">19:22</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Hola, vi en su Instagram...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row">
+        <div class="avatar">CV</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Carolina Vega</span>
+            <span class="chat-time">ayer</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Perfecto, muchas gracias</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge confirm">Entregado</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="avatar rose">LC</div>
+      <div class="info">
+        <div class="name">Lizeth Castro</div>
+        <div class="meta">+57 311 247 3500</div>
+      </div>
+      <div class="panel-actions">
+        <button class="icon-btn">📌</button>
+        <button class="icon-btn">🏷️</button>
+        <button class="icon-btn">📁</button>
+        <button class="icon-btn">⋯</button>
+      </div>
+    </div>
+
+    <div class="order-card">
+      <span class="pill">PENDIENTE</span>
+      <span class="item">📦 <span class="b">Set Alessia 3 Piezas</span> · Negro · S</span>
+      <span class="item" style="margin-left:auto;">💰 <span class="b">$199.900</span></span>
+    </div>
+
+    <div class="messages">
+      <div class="system-line">Hoy</div>
+
+      <div class="bubble out">
+        Hola Lizeth, buen día 😊<br><br>
+        Te escribimos para confirmar los datos de tu pedido antes de enviarlo.
+        <div class="time">21:08</div>
+      </div>
+
+      <div class="bubble out">
+        🧾 Pedido: #1390<br>
+        📦 Set Alessia 3 Piezas · Negro · S<br>
+        💵 Total: $199.900
+        <div class="time">21:08</div>
+      </div>
+
+      <div class="bubble in">
+        Hola, soy Lizeth Castro 😊<br>
+        Acabo de hacer un pedido y quiero confirmar mis datos
+        <div class="time">21:11</div>
+      </div>
+
+      <div class="bubble in">
+        CONFIRMADO
+        <div class="time">21:14</div>
+      </div>
+
+      <div class="bubble out">
+        Perfecto, tu pedido queda confirmado 💛<br><br>
+        Ya lo pasamos a despacho. Te estaremos avisando cualquier novedad por este medio.
+        <div class="time">21:14</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <button class="icon-btn">📎</button>
+      <button class="icon-btn">😊</button>
+      <input class="composer-input" placeholder="Mensaje a Lizeth..." />
+      <button class="send-btn">Enviar <span class="kbd">↵</span></button>
+    </div>
+  </section>
+</div>
+</body>
+</html>

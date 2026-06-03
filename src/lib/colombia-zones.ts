@@ -80,6 +80,88 @@ function getConfiguredBlockedCities(): string[] {
     .filter(Boolean);
 }
 
+// ─── Detector de envíos a oficinas (rechazo) ─────────────────────────────────
+// NO realizamos envíos a oficinas de transportadoras ni a oficinas propias del
+// cliente. El cliente debe poner una dirección residencial o comercial real.
+
+const OFFICE_KEYWORDS = [
+  // Genérico
+  "oficina principal",
+  "oficina central",
+  "oficina inter",
+  "ofic principal",
+  "of principal",
+  "oficinas inter",
+  // Recoger / retirar
+  "recoge en",
+  "recoger en",
+  "retiro en",
+  "retira en",
+  "recogida en",
+  "punto de retiro",
+  "punto de recogida",
+  // Transportadoras (palabras clave de oficinas de couriers)
+  "interrapidisimo",
+  "inter rapidisimo",
+  "servientrega",
+  "coordinadora",
+  "envia",
+  "tcc",
+  "deprisa",
+  "domina",
+  "saferbo",
+  "envíos urbano",
+  "envios urbano",
+  // Terminales / agencias
+  "terminal de transporte",
+  "agencia ",
+  "sucursal "
+];
+
+// Palabras que SOLAS no son rechazo pero combinadas con "oficina" sí
+const OFFICE_STRONG = ["oficina ", "oficinas ", "ofic "];
+
+export function isOfficeAddress(rawAddress: string): boolean {
+  const addr = normalizeZoneName(rawAddress || "");
+  if (!addr) return false;
+
+  // Match directo con keywords compuestas
+  for (const kw of OFFICE_KEYWORDS) {
+    if (addr.includes(kw)) return true;
+  }
+
+  // Match con prefijo "oficina/oficinas/ofic" (cualquier oficina cuenta)
+  for (const kw of OFFICE_STRONG) {
+    if (addr.includes(kw)) return true;
+  }
+
+  // "oficinas" sin espacio (al final por ejemplo)
+  if (/\boficinas?\b/i.test(addr) || /\bofic\b/i.test(addr)) return true;
+
+  return false;
+}
+
+export function buildOfficeRejectionMessage(
+  firstName: string,
+  orderNumber: string,
+  rawAddress: string
+): string {
+  const greeting = firstName ? `Hola ${firstName} 😊` : "Hola 😊";
+  return [
+    greeting,
+    "",
+    `Notamos que tu dirección de envío "${rawAddress}" parece ser una *oficina*.`,
+    "",
+    "Lamentablemente *no realizamos envíos a oficinas* (ni de transportadoras ni puntos de recogida), porque las novedades de entrega aumentan mucho y el cliente termina sin recibir su pedido.",
+    "",
+    `Para poder despachar tu pedido *${orderNumber}*, necesitamos una *dirección residencial o comercial* donde puedas recibirlo personalmente (calle/carrera + número + barrio).`,
+    "",
+    "🤝 Si nos envías una dirección alternativa por aquí, con gusto la actualizamos y despachamos. Si no, el pedido se cancelará automáticamente.",
+    "",
+    "Esperamos tu respuesta 💛"
+  ].join("\n");
+}
+
 // ─── API pública ──────────────────────────────────────────────────────────────
 
 export interface BlockedZoneResult {

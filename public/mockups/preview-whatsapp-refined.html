@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mockup · WhatsApp Refined</title>
+<style>
+  :root {
+    --wa-green: #00a884;
+    --wa-green-dark: #008f72;
+    --wa-green-soft: rgba(0, 168, 132, 0.12);
+    --radius: 10px;
+    --radius-sm: 6px;
+    --font: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #0b141a;
+    --bg-elev: #111b21;
+    --bg-elev-2: #202c33;
+    --bg-hover: #182229;
+    --bg-active: #2a3942;
+    --border: #222d34;
+    --text: #e9edef;
+    --text-muted: #8696a0;
+    --text-dim: #667781;
+    --bubble-out: #005c4b;
+    --bubble-in: #202c33;
+    --bubble-system: #182229;
+    --chat-bg: #0b141a;
+    --pattern: rgba(255,255,255,0.02);
+  }
+  [data-theme="light"] {
+    --bg: #efeae2;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #f0f2f5;
+    --bg-hover: #f5f6f6;
+    --bg-active: #f0f2f5;
+    --border: #e9edef;
+    --text: #111b21;
+    --text-muted: #54656f;
+    --text-dim: #8696a0;
+    --bubble-out: #d9fdd3;
+    --bubble-in: #ffffff;
+    --bubble-system: #ffffff;
+    --chat-bg: #efeae2;
+    --pattern: rgba(0,0,0,0.02);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14.2px;
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .app { display: grid; grid-template-columns: 56px 380px 1fr; height: 100vh; }
+
+  /* Nav */
+  .nav {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 14px 0; gap: 4px;
+  }
+  .nav-item {
+    width: 40px; height: 40px; border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--text-muted); cursor: pointer;
+    font-size: 18px; transition: all 0.15s; position: relative;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text); }
+  .nav-item.active { color: var(--wa-green); background: var(--wa-green-soft); }
+  .badge {
+    position: absolute; top: 4px; right: 4px;
+    background: var(--wa-green); color: #fff;
+    min-width: 16px; height: 16px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; padding: 0 4px;
+    display: grid; place-items: center;
+  }
+  .nav-spacer { flex: 1; }
+  .me-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--wa-green), var(--wa-green-dark));
+    color: #fff; display: grid; place-items: center; font-weight: 700;
+    margin-top: 4px; cursor: pointer; font-size: 13px;
+  }
+
+  /* List */
+  .list {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .list-head {
+    padding: 16px 18px 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .list-head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  .list-actions { display: flex; gap: 2px; }
+  .list-actions .icon {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--text-muted); cursor: pointer; font-size: 15px;
+  }
+  .list-actions .icon:hover { background: var(--bg-hover); }
+
+  .search-wrap { padding: 6px 12px 6px; }
+  .search {
+    background: var(--bg-elev-2);
+    border-radius: 8px; padding: 9px 14px;
+    display: flex; align-items: center; gap: 12px;
+    font-size: 14px;
+  }
+  .search input {
+    flex: 1; background: transparent; border: 0; outline: 0;
+    color: var(--text); font-size: 14px; font-family: var(--font);
+  }
+  .search input::placeholder { color: var(--text-dim); }
+
+  .filters { display: flex; gap: 8px; padding: 8px 12px 6px; overflow-x: auto; }
+  .chip {
+    padding: 5px 14px; border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--text-muted);
+    font-size: 13px; font-weight: 500;
+    white-space: nowrap; cursor: pointer; border: 0;
+  }
+  .chip.active { background: var(--wa-green-soft); color: var(--wa-green); }
+
+  .list-scroll { flex: 1; overflow-y: auto; }
+  .chat-row {
+    padding: 11px 16px;
+    display: flex; gap: 13px; cursor: pointer; align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .chat-row:hover { background: var(--bg-hover); }
+  .chat-row.active { background: var(--bg-active); }
+  .avatar {
+    width: 49px; height: 49px; border-radius: 50%;
+    display: grid; place-items: center; color: #fff;
+    font-weight: 600; font-size: 16px;
+    background: linear-gradient(135deg, #4a5560, #2c3640);
+    flex-shrink: 0;
+  }
+  .avatar.green { background: linear-gradient(135deg, var(--wa-green), var(--wa-green-dark)); }
+  .avatar.violet { background: linear-gradient(135deg, #8e7cc3, #5e4d8a); }
+  .avatar.coral { background: linear-gradient(135deg, #e76f51, #c14a30); }
+  .avatar.amber { background: linear-gradient(135deg, #e9a45c, #b07534); }
+
+  .chat-body { flex: 1; min-width: 0; }
+  .chat-line1 {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;
+  }
+  .chat-name { font-weight: 600; font-size: 15px; flex: 1; }
+  .chat-time { font-size: 11.5px; color: var(--wa-green); }
+  .chat-time.dim { color: var(--text-dim); }
+  .chat-line2 { display: flex; align-items: center; gap: 8px; }
+  .chat-preview {
+    flex: 1; min-width: 0;
+    color: var(--text-muted); font-size: 13.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chat-unread {
+    background: var(--wa-green); color: #fff;
+    border-radius: 999px; padding: 1px 7px;
+    font-size: 11px; font-weight: 700; min-width: 18px; text-align: center;
+  }
+  .chat-pin { font-size: 11px; color: var(--text-muted); }
+  .chat-labels { display: flex; gap: 4px; margin-top: 4px; }
+  .label-badge {
+    font-size: 10.5px; padding: 1.5px 8px; border-radius: 4px;
+    font-weight: 600;
+  }
+  .label-badge.confirm { background: var(--wa-green-soft); color: var(--wa-green); }
+  .label-badge.pending { background: rgba(247, 162, 0, 0.15); color: #f7a200; }
+  .label-badge.vip { background: rgba(180, 90, 220, 0.18); color: #b45adc; }
+
+  .section-label {
+    padding: 14px 16px 4px;
+    color: var(--wa-green); font-size: 12px; font-weight: 600;
+  }
+
+  /* Panel */
+  .panel { display: flex; flex-direction: column; background: var(--chat-bg);
+    background-image:
+      linear-gradient(var(--pattern) 1px, transparent 1px),
+      linear-gradient(90deg, var(--pattern) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .panel-head {
+    padding: 10px 18px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+  }
+  .panel-head .info { flex: 1; }
+  .panel-head .name { font-weight: 500; font-size: 15.5px; }
+  .panel-head .meta { font-size: 12.5px; color: var(--wa-green); }
+  .panel-actions { display: flex; gap: 4px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--text-muted); cursor: pointer; font-size: 15px;
+    background: transparent; border: 0;
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+  .icon-btn.active { color: var(--wa-green); }
+
+  .order-card {
+    margin: 14px 80px 4px 80px;
+    padding: 12px 16px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    border-left: 4px solid #f7a200;
+    display: flex; align-items: center; gap: 12px;
+    font-size: 13.5px;
+  }
+  .order-card .b { font-weight: 600; }
+  .order-card .pill {
+    background: rgba(247, 162, 0, 0.15);
+    color: #f7a200;
+    padding: 3px 9px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+
+  .messages { flex: 1; overflow-y: auto; padding: 12px 80px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .bubble {
+    max-width: 65%;
+    padding: 7px 10px 8px;
+    border-radius: 8px;
+    font-size: 14.2px; line-height: 1.42;
+    word-wrap: break-word; position: relative;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
+  }
+  .bubble.out {
+    align-self: flex-end;
+    background: var(--bubble-out);
+    border-top-right-radius: 2px;
+  }
+  .bubble.in {
+    align-self: flex-start;
+    background: var(--bubble-in);
+    border-top-left-radius: 2px;
+  }
+  .bubble .time {
+    font-size: 11px; color: var(--text-dim);
+    margin-top: 2px; text-align: right; padding-left: 8px;
+    display: inline-block; float: right; margin-left: 6px;
+  }
+  .system-line {
+    align-self: center;
+    background: var(--bubble-system);
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 5px 12px; border-radius: 8px;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.1);
+  }
+
+  .composer {
+    padding: 8px 16px;
+    background: var(--bg-elev);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .composer-input {
+    flex: 1;
+    background: var(--bg-elev-2);
+    border: 0; border-radius: 10px;
+    padding: 10px 14px;
+    color: var(--text); font-size: 14.5px; font-family: var(--font);
+    outline: 0;
+  }
+  .send-btn {
+    width: 42px; height: 42px;
+    background: transparent; color: var(--text-muted);
+    border: 0; cursor: pointer;
+    display: grid; place-items: center; font-size: 20px;
+  }
+  .send-btn:hover { color: var(--wa-green); }
+
+  .theme-toggle {
+    position: fixed; top: 10px; right: 16px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 14px;
+    color: var(--text); cursor: pointer; font-size: 12px;
+    font-family: var(--font); z-index: 100;
+  }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">Cambiar tema</button>
+
+<div class="app">
+  <nav class="nav">
+    <div class="nav-item active">💬<span class="badge">4</span></div>
+    <div class="nav-item">🏷️</div>
+    <div class="nav-item">📁</div>
+    <div class="nav-item">📊</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-item">⚙️</div>
+    <div class="me-avatar">E</div>
+  </nav>
+
+  <aside class="list">
+    <div class="list-head">
+      <h1>Chats</h1>
+      <div class="list-actions">
+        <span class="icon">📷</span>
+        <span class="icon">＋</span>
+        <span class="icon">⋯</span>
+      </div>
+    </div>
+    <div class="search-wrap">
+      <div class="search">
+        <span>🔍</span>
+        <input placeholder="Buscar o iniciar un chat" />
+      </div>
+    </div>
+    <div class="filters">
+      <button class="chip active">Todos</button>
+      <button class="chip">No leídos</button>
+      <button class="chip">Pendientes</button>
+      <button class="chip">VIP</button>
+    </div>
+
+    <div class="list-scroll">
+      <div class="section-label">📌 FIJADOS</div>
+
+      <div class="chat-row">
+        <div class="avatar green">YO</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Mensajes guardados</span>
+            <span class="chat-pin">📌</span>
+            <span class="chat-time dim">12:34</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Tú: tracking trans-9012-XX</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row active">
+        <div class="avatar violet">LC</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Lizeth Castro</span>
+            <span class="chat-pin">📌</span>
+            <span class="chat-time">21:14</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">CONFIRMADO ✅</span>
+            <span class="chat-unread">2</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge vip">VIP</span>
+            <span class="label-badge pending">Por despachar</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">RECIENTES</div>
+
+      <div class="chat-row">
+        <div class="avatar coral">MG</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">María González</span>
+            <span class="chat-time">20:48</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">¿Cuándo me llega el pedido?</span>
+            <span class="chat-unread">1</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge confirm">Confirmado</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row">
+        <div class="avatar amber">JP</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Juan Pablo Ríos</span>
+            <span class="chat-time dim">19:22</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Hola, vi en su Instagram...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-row">
+        <div class="avatar">CV</div>
+        <div class="chat-body">
+          <div class="chat-line1">
+            <span class="chat-name">Carolina Vega</span>
+            <span class="chat-time dim">ayer</span>
+          </div>
+          <div class="chat-line2">
+            <span class="chat-preview">Perfecto, muchas gracias 🙏</span>
+          </div>
+          <div class="chat-labels">
+            <span class="label-badge confirm">Entregado</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="avatar violet" style="width:40px;height:40px;font-size:14px;">LC</div>
+      <div class="info">
+        <div class="name">Lizeth Castro</div>
+        <div class="meta">en línea</div>
+      </div>
+      <div class="panel-actions">
+        <button class="icon-btn active">📌</button>
+        <button class="icon-btn">🏷️</button>
+        <button class="icon-btn">🔍</button>
+        <button class="icon-btn">⋯</button>
+      </div>
+    </div>
+
+    <div class="order-card">
+      <span class="pill">PENDIENTE</span>
+      <span>📦 <span class="b">Set Alessia 3 Piezas</span> · Negro · S</span>
+      <span style="margin-left:auto;">💰 <span class="b">$199.900</span></span>
+    </div>
+
+    <div class="messages">
+      <div class="system-line">Hoy</div>
+
+      <div class="bubble out">
+        Hola Lizeth, buen día 😊<br><br>
+        Te escribimos para confirmar los datos de tu pedido antes de enviarlo.
+        <span class="time">21:08 ✓✓</span>
+      </div>
+
+      <div class="bubble out">
+        🧾 Pedido: #1390<br>
+        📦 Set Alessia 3 Piezas · Negro · S<br>
+        💵 Total: $199.900
+        <span class="time">21:08 ✓✓</span>
+      </div>
+
+      <div class="bubble in">
+        Hola, soy Lizeth Castro 😊<br>
+        Acabo de hacer un pedido y quiero confirmar mis datos
+        <span class="time">21:11</span>
+      </div>
+
+      <div class="bubble in">
+        CONFIRMADO
+        <span class="time">21:14</span>
+      </div>
+
+      <div class="bubble out">
+        Perfecto, tu pedido queda confirmado 💛<br><br>
+        Ya lo pasamos a despacho. Te estaremos avisando cualquier novedad por este medio.
+        <span class="time">21:14 ✓✓</span>
+      </div>
+    </div>
+
+    <div class="composer">
+      <button class="icon-btn">😊</button>
+      <button class="icon-btn">📎</button>
+      <input class="composer-input" placeholder="Escribe un mensaje" />
+      <button class="send-btn">🎙️</button>
+    </div>
+  </section>
+</div>
+</body>
+</html>

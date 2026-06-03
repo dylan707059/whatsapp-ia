@@ -3,7 +3,7 @@ import "./env-loader";
 import fs from "node:fs";
 import path from "node:path";
 import { start, getHandle } from "../src/lib/baileys/client";
-import { getPendingOutbox, markOutboxSent, getConnectionState, enqueueOutbox, insertMessage } from "../src/lib/db";
+import { getPendingOutbox, claimOutboxItem, getConnectionState, enqueueOutbox, insertMessage } from "../src/lib/db";
 import {
   getOrdersNeedingReminder,
   getOrdersToAutoCancel,
@@ -27,12 +27,18 @@ setInterval(async () => {
   if (getConnectionState().status !== "connected") return;
 
   for (const item of getPendingOutbox(20)) {
+    // CLAIM atómico: si otro tick ya lo procesó o si el item ya fue enviado
+    // (por ejemplo después de un restart que dejó la fila inconsistente),
+    // skip. Esto da semántica AT-MOST-ONCE: preferimos perder ocasionalmente
+    // un mensaje a spamear al cliente con duplicados.
+    if (!claimOutboxItem(item.id)) {
+      continue;
+    }
     try {
       await handle.sock.sendMessage(item.phone, { text: item.content });
-      markOutboxSent(item.id);
       console.log(`[bot] → Outbox enviado a ${item.phone}`);
     } catch (err) {
-      console.error(`[bot] Error enviando outbox #${item.id}:`, err);
+      console.error(`[bot] Error enviando outbox #${item.id} (NO se reintenta):`, err);
     }
   }
 }, 2000);

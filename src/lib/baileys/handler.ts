@@ -189,6 +189,9 @@ async function processMessage(
   const now = Math.floor(Date.now() / 1000);
   const aiPaused = fresh.ai_paused_until && fresh.ai_paused_until > now;
 
+  // Cachear el active order para reusar en checks posteriores
+  const activeOrderForConv = getActiveOrder(convo.id);
+
   // ─── Confirmación del cliente ─────────────────────────────────────────────
   // La confirmación pasa por la cola incluso con IA pausada (HUMAN mode)
   if (isConfirmationMessage(text)) {
@@ -214,6 +217,20 @@ async function processMessage(
   }
 
   if (fresh.mode !== "AI") return;
+
+  // ─── Bloquear IA en convs con pedido SHOPIFY ──────────────────────────────
+  // Si la conversación tiene CUALQUIER pedido SHOPIFY (incluso CONFIRMED o
+  // CANCELLED), la IA no debe responder: el flujo SHOPIFY ya maneja todas
+  // las confirmaciones y cualquier respuesta IA sería duplicada/conflictiva.
+  // El cliente puede reenviar los datos del pedido en el chat (típico de
+  // Releasit) y sin este check la IA generaría su propia confirmación.
+  if (activeOrderForConv && activeOrderForConv.source === "SHOPIFY") {
+    console.log(
+      `[bot] Conv ${convo.id} tiene order SHOPIFY #${activeOrderForConv.id} ` +
+      `(status ${activeOrderForConv.status}) — IA no responde para evitar duplicado`
+    );
+    return;
+  }
 
   const history = getRecentHistory(convo.id, 20);
   console.log(`[bot] Llamando LLM con ${history.length} mensajes...`);

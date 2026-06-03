@@ -377,22 +377,42 @@ const stmtPendingOutbox = db.prepare<[number], OutboxItem>(
 const stmtMarkSent = db.prepare<[number]>(
   "UPDATE outbox SET sent = 1 WHERE id = ?"
 );
+const stmtClaimOutbox = db.prepare<[number]>(
+  // Marca atómicamente como sent=1 si todavía no lo está. Devuelve 1 si lo
+  // claimeamos exitosamente (este proceso es el responsable de enviarlo).
+  "UPDATE outbox SET sent = 1 WHERE id = ? AND sent = 0"
+);
 const stmtAdvancePending = db.prepare<[number], { changes: number }>(
   "UPDATE outbox SET scheduled_at = 0 WHERE conversation_id = ? AND sent = 0 AND scheduled_at > unixepoch()"
+);
+const stmtFindRecentOutbox = db.prepare<[number, string, number], OutboxItem>(
+  // Para dedup: busca si el mismo content fue encolado para la misma conv
+  // en los últimos N segundos. Cubre tanto pendientes como ya enviados.
+  "SELECT * FROM outbox WHERE conversation_id = ? AND content = ? AND created_at >= ? LIMIT 1"
 );
 
 /**
  * Encola un mensaje para envío vía outbox.
  * @param scheduledAt timestamp Unix en segundos. 0 (default) = enviar ASAP.
  *                   Cualquier valor > now hace que el poller espere hasta ese momento.
+ * @returns true si se encoló; false si se descartó por duplicado reciente.
  */
 export function enqueueOutbox(
   conversationId: number,
   phone: string,
   content: string,
   scheduledAt = 0
-): void {
+): boolean {
+  // Dedup: si en los últimos 10 minutos ya pusimos exactamente este content
+  // en outbox para la misma conv, NO encolamos otra vez. Evita disparos
+  // duplicados desde flujos paralelos (Shopify webhook + IA, retry de webhook,
+  // etc.) y evita reenviar al cliente.
+  const since = Math.floor(Date.now() / 1000) - 600;
+  const existing = stmtFindRecentOutbox.get(conversationId, content, since);
+  if (existing) return false;
+
   stmtEnqueue.run(conversationId, phone, content, scheduledAt);
+  return true;
 }
 
 export function getPendingOutbox(limit = 20): OutboxItem[] {
@@ -401,6 +421,16 @@ export function getPendingOutbox(limit = 20): OutboxItem[] {
 
 export function markOutboxSent(id: number): void {
   stmtMarkSent.run(id);
+}
+
+/**
+ * Intenta claimear un item de outbox para envío atómico (at-most-once).
+ * Devuelve true si el caller debe enviar el mensaje; false si otro proceso
+ * ya lo claimeó o ya fue enviado.
+ */
+export function claimOutboxItem(id: number): boolean {
+  const result = stmtClaimOutbox.run(id);
+  return result.changes > 0;
 }
 
 /**

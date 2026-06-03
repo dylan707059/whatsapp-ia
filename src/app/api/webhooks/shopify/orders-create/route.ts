@@ -15,7 +15,12 @@ import {
   buildConfirmationMessage,
   type ShopifyOrderPayload
 } from "@/lib/shopify";
-import { isBlockedZone, buildRejectionMessage } from "@/lib/colombia-zones";
+import {
+  isBlockedZone,
+  buildRejectionMessage,
+  isOfficeAddress,
+  buildOfficeRejectionMessage
+} from "@/lib/colombia-zones";
 import { insertOrderEvent } from "@/lib/order-events";
 
 export const runtime = "nodejs";
@@ -111,6 +116,49 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ok: true,
       skipped: "blocked_zone",
       reason: zoneCheck.reason,
+      orderId,
+      conversationId: conv.id
+    });
+  }
+
+  // ─── 6b. Rechazo de envíos a oficinas ─────────────────────────────────────
+  // No despachamos a oficinas de transportadoras ni puntos de retiro.
+  // Mismo flujo que zonas bloqueadas: order CANCELLED + mensaje pidiendo
+  // dirección residencial alternativa.
+  if (isOfficeAddress(orderData.address)) {
+    const orderId = upsertOrder(conv.id, orderData, "CANCELLED", "SHOPIFY");
+    const rejectionText = buildOfficeRejectionMessage(
+      parsed.firstName, parsed.orderNumber, orderData.address
+    );
+
+    insertOrderEvent({
+      orderId,
+      conversationId: conv.id,
+      eventType: "SHOPIFY_ORDER_REJECTED_BLOCKED_ZONE",
+      message: `Pedido ${parsed.orderNumber} rechazado: dirección es oficina`,
+      metadata: {
+        shopifyOrderId: parsed.orderId,
+        shopifyOrderNumber: parsed.orderNumber,
+        reason: "office_address",
+        address: orderData.address
+      }
+    });
+
+    const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+    const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
+
+    insertMessage(conv.id, "assistant", rejectionText);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt);
+
+    console.log(
+      `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por dirección de oficina ` +
+      `("${orderData.address}") — conv #${conv.id} — order #${orderId} CANCELLED`
+    );
+
+    return NextResponse.json({
+      ok: true,
+      skipped: "office_address",
+      address: orderData.address,
       orderId,
       conversationId: conv.id
     });

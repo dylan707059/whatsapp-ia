@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import os from "node:os";
 import { DATA_DIR, DB_PATH } from "./paths";
+import { hashPassword, generateSessionToken } from "./auth";
 import type {
   Conversation,
   ConversationWithPreview,
@@ -216,6 +217,27 @@ db.exec(`
     phone      TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+
+  -- ─── Multi-cuenta (login) ───────────────────────────────────────────────────
+  -- Cada cuenta es un negocio distinto. Los datos del sistema se asocian al
+  -- negocio via owner_phone (el numero de WhatsApp conectado de esa cuenta).
+  CREATE TABLE IF NOT EXISTS accounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    business_name TEXT,
+    owner_phone   TEXT,
+    created_at    INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token      TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    expires_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
 `);
 
 // ─── 2. Migraciones — solo para bases de datos antiguas ───────────────────────
@@ -750,4 +772,91 @@ export function getAllConversationLabels(ownerPhone: string): Map<number, Label[
     map.set(row.conversation_id, list);
   }
   return map;
+}
+
+// ─── Cuentas y sesiones (login) ───────────────────────────────────────────────
+export interface Account {
+  id: number;
+  email: string;
+  password_hash: string;
+  business_name: string | null;
+  owner_phone: string | null;
+  created_at: number;
+}
+
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 días
+
+const stmtGetAccountByEmail = db.prepare<[string], Account>(
+  "SELECT * FROM accounts WHERE email = ?"
+);
+const stmtGetAccountById = db.prepare<[number], Account>(
+  "SELECT * FROM accounts WHERE id = ?"
+);
+const stmtInsertAccount = db.prepare<[string, string, string | null, string | null], Account>(
+  "INSERT INTO accounts (email, password_hash, business_name, owner_phone) VALUES (?, ?, ?, ?) RETURNING *"
+);
+const stmtInsertSession = db.prepare<[string, number, number]>(
+  "INSERT INTO sessions (token, account_id, expires_at) VALUES (?, ?, ?)"
+);
+const stmtGetSessionAccount = db.prepare<[string, number], Account>(`
+  SELECT a.* FROM accounts a
+  JOIN sessions s ON s.account_id = a.id
+  WHERE s.token = ? AND s.expires_at > ?
+`);
+const stmtDeleteSession = db.prepare<[string]>("DELETE FROM sessions WHERE token = ?");
+
+export function getAccountByEmail(email: string): Account | undefined {
+  return stmtGetAccountByEmail.get(email.toLowerCase().trim());
+}
+export function getAccountById(id: number): Account | undefined {
+  return stmtGetAccountById.get(id);
+}
+export function createAccount(
+  email: string,
+  passwordHash: string,
+  businessName: string | null = null,
+  ownerPhone: string | null = null
+): Account {
+  return stmtInsertAccount.all(email.toLowerCase().trim(), passwordHash, businessName, ownerPhone)[0];
+}
+
+/** Crea una sesión nueva y devuelve su token (para guardar en cookie). */
+export function createSession(accountId: number): string {
+  const token = generateSessionToken();
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  stmtInsertSession.run(token, accountId, expiresAt);
+  return token;
+}
+
+/** Devuelve la cuenta asociada a un token de sesión válido (o undefined). */
+export function getAccountBySessionToken(token: string): Account | undefined {
+  if (!token) return undefined;
+  const now = Math.floor(Date.now() / 1000);
+  return stmtGetSessionAccount.get(token, now);
+}
+
+export function deleteSession(token: string): void {
+  if (token) stmtDeleteSession.run(token);
+}
+
+// ─── Auto-seed de la cuenta inicial desde variables de entorno ────────────────
+// Idempotente: si la cuenta ya existe, no hace nada. Permite crear la primera
+// cuenta en Render sin exponer la contraseña en el código — basta con definir
+// SEED_ACCOUNT_EMAIL y SEED_ACCOUNT_PASSWORD en el panel de Render una vez.
+// El email tiene un valor por defecto para reducir fricción.
+if (process.env.NEXT_PHASE !== "phase-production-build" && process.env.SEED_ACCOUNT_PASSWORD) {
+  try {
+    const seedEmail = (process.env.SEED_ACCOUNT_EMAIL || "dylangofo1@gmail.com").toLowerCase().trim();
+    if (!getAccountByEmail(seedEmail)) {
+      createAccount(
+        seedEmail,
+        hashPassword(process.env.SEED_ACCOUNT_PASSWORD),
+        process.env.SEED_ACCOUNT_BUSINESS || "Eclipse",
+        process.env.SEED_ACCOUNT_OWNER_PHONE || null
+      );
+      console.log(`[auth] Cuenta inicial creada: ${seedEmail}`);
+    }
+  } catch (err) {
+    console.error("[auth] Error en auto-seed de cuenta:", err);
+  }
 }

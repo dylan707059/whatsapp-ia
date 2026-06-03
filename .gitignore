@@ -11,7 +11,8 @@ out/
 .env*.local
 
 # Sesión Baileys (contiene credenciales WhatsApp — NUNCA subir)
-auth/
+# Solo la carpeta auth/ de la raíz, no src/app/api/auth (rutas del login)
+/auth/
 
 # Base de datos local (contiene mensajes y pedidos — NUNCA subir)
 data/

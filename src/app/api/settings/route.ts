@@ -23,15 +23,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const saved = getAccountSettings(account.id);
 
+  // Multi-tenant: cada cuenta ve SOLO su propia configuración (vacío si no ha
+  // guardado nada). No exponemos las variables de entorno globales aquí, para
+  // que la config de una cuenta no aparezca en el formulario de otra.
   const settings = {
     shopifyDomain:            saved?.shopify_domain            ?? "",
-    shopifyWebhookSecret:     saved?.shopify_webhook_secret    ?? (process.env.SHOPIFY_WEBHOOK_SECRET ?? ""),
-    confirmationDelaySeconds: saved?.confirmation_delay_seconds
-                                ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180),
-    blockedDepartments:       saved?.blocked_departments       ?? (process.env.SHOPIFY_BLOCKED_DEPARTMENTS ?? ""),
-    blockedCities:            saved?.blocked_cities            ?? (process.env.SHOPIFY_BLOCKED_CITIES ?? ""),
-    blockedDepartmentCodes:   saved?.blocked_department_codes  ?? (process.env.SHOPIFY_BLOCKED_DEPARTMENT_CODES ?? ""),
-    ownerNotifyPhones:        saved?.owner_notify_phones       ?? (process.env.OWNER_NOTIFY_PHONES ?? "")
+    shopifyWebhookSecret:     saved?.shopify_webhook_secret    ?? "",
+    confirmationDelaySeconds: saved?.confirmation_delay_seconds ?? 180,
+    blockedDepartments:       saved?.blocked_departments       ?? "",
+    blockedCities:            saved?.blocked_cities            ?? "",
+    blockedDepartmentCodes:   saved?.blocked_department_codes  ?? "",
+    ownerNotifyPhones:        saved?.owner_notify_phones       ?? ""
   };
 
   return NextResponse.json({ configured: Boolean(saved?.configured), settings });

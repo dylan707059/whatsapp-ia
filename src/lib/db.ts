@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import path from "node:path";
+import os from "node:os";
 import { DATA_DIR, DB_PATH } from "./paths";
 import type {
   Conversation,
@@ -26,7 +28,21 @@ export type {
 // paths.ts ya crea DATA_DIR si no existe
 void DATA_DIR;
 
-const db = new Database(DB_PATH);
+// ─── DB path resolver con fallback en build-time ──────────────────────────────
+// Durante `next build` Next.js evalúa todas las rutas API para análisis
+// estático. Eso ejecuta este módulo. En el sandbox de build de Render, el
+// volumen persistente puede no estar montado/escribible y SQLite tira
+// SQLITE_ERROR ("Failed to collect page data"). Detectamos esa fase y caemos
+// a un DB temporal descartable — los prepared statements compilan, el build
+// pasa, y en runtime real se usa DB_PATH normal.
+function resolveDbPath(): string {
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return path.join(os.tmpdir(), `next-build-${process.pid}.db`);
+  }
+  return DB_PATH;
+}
+
+const db = new Database(resolveDbPath());
 
 // ─── 1. DDL — siempre primero, antes de cualquier PRAGMA table_info ────────────
 // CREATE TABLE IF NOT EXISTS incluye TODAS las columnas actuales.

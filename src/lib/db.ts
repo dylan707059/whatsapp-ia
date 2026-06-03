@@ -80,10 +80,11 @@ db.exec(`
     phone           TEXT NOT NULL,
     content         TEXT NOT NULL,
     sent            INTEGER NOT NULL DEFAULT 0,
+    scheduled_at    INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
-  CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(sent, created_at);
+  CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(sent, scheduled_at);
 
   CREATE TABLE IF NOT EXISTS orders (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,6 +189,13 @@ db.exec(`
     .map(c => c.name);
   if (!cols.includes("duplicate_order_id"))
     db.exec("ALTER TABLE photo_confirm_sessions ADD COLUMN duplicate_order_id INTEGER");
+}
+{
+  const cols = (db.prepare("PRAGMA table_info(outbox)").all() as { name: string }[])
+    .map(c => c.name);
+  if (!cols.includes("scheduled_at")) {
+    db.exec("ALTER TABLE outbox ADD COLUMN scheduled_at INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 // ─── 3. Exportar instancia ────────────────────────────────────────────────────
@@ -299,23 +307,49 @@ export function setConnectionState(patch: {
 }
 
 // Outbox
-const stmtEnqueue = db.prepare<[number, string, string]>(
-  "INSERT INTO outbox (conversation_id, phone, content) VALUES (?, ?, ?)"
+const stmtEnqueue = db.prepare<[number, string, string, number]>(
+  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at) VALUES (?, ?, ?, ?)"
 );
 const stmtPendingOutbox = db.prepare<[number], OutboxItem>(
-  "SELECT * FROM outbox WHERE sent = 0 ORDER BY created_at ASC LIMIT ?"
+  "SELECT * FROM outbox WHERE sent = 0 AND scheduled_at <= unixepoch() ORDER BY created_at ASC LIMIT ?"
 );
 const stmtMarkSent = db.prepare<[number]>(
   "UPDATE outbox SET sent = 1 WHERE id = ?"
 );
-export function enqueueOutbox(conversationId: number, phone: string, content: string): void {
-  stmtEnqueue.run(conversationId, phone, content);
+const stmtAdvancePending = db.prepare<[number], { changes: number }>(
+  "UPDATE outbox SET scheduled_at = 0 WHERE conversation_id = ? AND sent = 0 AND scheduled_at > unixepoch()"
+);
+
+/**
+ * Encola un mensaje para envío vía outbox.
+ * @param scheduledAt timestamp Unix en segundos. 0 (default) = enviar ASAP.
+ *                   Cualquier valor > now hace que el poller espere hasta ese momento.
+ */
+export function enqueueOutbox(
+  conversationId: number,
+  phone: string,
+  content: string,
+  scheduledAt = 0
+): void {
+  stmtEnqueue.run(conversationId, phone, content, scheduledAt);
 }
+
 export function getPendingOutbox(limit = 20): OutboxItem[] {
   return stmtPendingOutbox.all(limit);
 }
+
 export function markOutboxSent(id: number): void {
   stmtMarkSent.run(id);
+}
+
+/**
+ * Adelanta todos los mensajes pendientes (futuros) de una conversación
+ * para que se envíen en el próximo tick del poller.
+ * @returns cantidad de filas adelantadas.
+ */
+export function advancePendingOutbox(conversationId: number): number {
+  const result = stmtAdvancePending.run(conversationId);
+  return result.changes;
 }
 
 // Borrar conversación

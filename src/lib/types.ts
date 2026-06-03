@@ -52,6 +52,7 @@ export interface OutboxItem {
   phone: string;
   content: string;
   sent: number;
+  scheduled_at: number;
   created_at: number;
 }
 

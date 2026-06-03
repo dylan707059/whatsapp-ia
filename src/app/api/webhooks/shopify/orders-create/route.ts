@@ -114,20 +114,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   });
 
-  // ─── 8. Encolar el mensaje de confirmación ─────────────────────────────────
+  // ─── 8. Encolar el mensaje de confirmación con delay anti-bloqueo ──────────
+  // Releasit pide al cliente que escriba primero a WhatsApp. Si no escribe en
+  // SHOPIFY_CONFIRMATION_DELAY_SECONDS (default 180s = 3 min), enviamos igual.
+  // El handler de mensajes entrantes adelanta este envío si el cliente escribe
+  // antes (vía advancePendingOutbox).
+  const delaySec = Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
+  const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
+
   const message = buildConfirmationMessage(parsed);
+  // Mismo patrón que el POST de mensajes humanos: insertamos en messages al
+  // encolar (para que aparezca en el dashboard) y dejamos outbox como cola de
+  // envío real. El outbox respeta scheduled_at — solo dispara cuando llega
+  // el momento, o cuando el handler entrante lo adelanta.
   insertMessage(conv.id, "assistant", message);
-  enqueueOutbox(conv.id, conv.phone, message);
+  enqueueOutbox(conv.id, conv.phone, message, scheduledAt);
 
   console.log(
     `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +
-    `mensaje encolado en outbox`
+    `mensaje programado para ${new Date(scheduledAt * 1000).toISOString()} ` +
+    `(delay ${delaySec}s; se adelanta si cliente escribe primero)`
   );
 
   return NextResponse.json({
     ok: true,
     conversationId: conv.id,
     orderId,
-    customerPhone: normalizePhone(parsed.rawPhone)
+    customerPhone: normalizePhone(parsed.rawPhone),
+    scheduledAt
   });
 }

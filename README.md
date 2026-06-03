@@ -239,12 +239,26 @@ WhatsApp al cliente pidiendo confirmar los datos antes de despachar.
 3. Se crea/encuentra la conversación del cliente en SQLite y se registra
    un `Order` con `status='PENDING_CONFIRMATION'` y `source='SHOPIFY'`.
 4. Se encola un mensaje en `outbox` con el detalle del pedido pidiendo que
-   responda **CONFIRMADO**.
-5. La conversación se setea a modo `HUMAN` para que la IA no responda en
+   responda **CONFIRMADO**, pero con `scheduled_at = ahora + delay` (default
+   3 min) para evitar bloqueo de WhatsApp por enviar mensajes no solicitados.
+5. **Anti-bloqueo:**
+   - Si el cliente nos escribe **antes** del delay (porque Releasit lo
+     instruyó), el handler entrante dispara `advancePendingOutbox()` y la
+     confirmación sale en el siguiente tick del poller (~2s).
+   - Si el cliente **no escribe** dentro del delay, la confirmación se
+     envía igual cuando se cumple el tiempo.
+6. La conversación se setea a modo `HUMAN` para que la IA no responda en
    paralelo. Si querés que la IA conteste, togglealo manualmente desde el
    dashboard.
-6. Cuando el cliente responde **CONFIRMADO** se dispara el flujo existente
+7. Cuando el cliente responde **CONFIRMADO** se dispara el flujo existente
    de `order-confirmation.ts` y se notifica al owner.
+
+### Tunear el delay anti-bloqueo
+
+Variable de entorno opcional `SHOPIFY_CONFIRMATION_DELAY_SECONDS` (default
+`180`). Subila si tu flujo de Releasit toma más, o bajala a `0` si querés
+enviar la confirmación inmediatamente (NO recomendado: alto riesgo de
+bloqueo Baileys).
 
 ### Anti-duplicados
 

@@ -8,7 +8,8 @@ import {
   setConfirmedAt,
   setAiPausedUntil,
   setConversationMode,
-  isClientBlocked
+  isClientBlocked,
+  advancePendingOutbox
 } from "../db";
 import { generateReply } from "../openai";
 import {
@@ -121,6 +122,19 @@ async function processMessage(
   // ─── Guardar mensaje del cliente ──────────────────────────────────────────
   const convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
   insertMessage(convo.id, "user", text);
+
+  // ─── Adelantar outbox programado (confirmaciones Shopify diferidas) ───────
+  // Si hay un mensaje pendiente con scheduled_at futuro (típicamente la
+  // confirmación de pedido Shopify que esperaba 3 min), lo enviamos YA porque
+  // el cliente ya nos escribió — evita el delay innecesario y respeta el
+  // flujo anti-bloqueo: solo enviamos cuando hay una ventana de servicio
+  // abierta de su lado.
+  const advanced = advancePendingOutbox(convo.id);
+  if (advanced > 0) {
+    console.log(
+      `[bot] Cliente ${jid} escribió primero — adelantando ${advanced} mensaje(s) en outbox`
+    );
+  }
 
   // ─── Reclamo ──────────────────────────────────────────────────────────────
   if (isComplaintMessage(text)) {

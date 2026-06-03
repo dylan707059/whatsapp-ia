@@ -197,8 +197,11 @@ export function getTodayStats(): TodayStats {
 // (created_at si nunca recordamos, last_reminder_at si ya recordamos) fue
 // hace más de N segundos. Limit max reminders defaults a 2.
 
+// Recordatorios: solo aplican si NO hubo actividad reciente en la conversación
+// (mensaje del cliente, manual del owner o del bot) en las últimas N horas.
+// Si hubo actividad, el cliente ya está conversando -> no spam con recordatorio.
 const stmtOrdersNeedingReminder = db.prepare<
-  [number, number],
+  [number, number, number],
   Order & { conv_name: string | null; conv_phone: string }
 >(`
   SELECT o.*, c.name as conv_name, c.phone as conv_phone
@@ -208,12 +211,17 @@ const stmtOrdersNeedingReminder = db.prepare<
     AND o.status = 'PENDING_CONFIRMATION'
     AND o.reminder_count < ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.conversation_id = o.conversation_id
+        AND m.created_at >= ?
+    )
   ORDER BY o.created_at ASC
   LIMIT 50
 `);
 
 const stmtOrdersToCancel = db.prepare<
-  [number, number],
+  [number, number, number],
   Order & { conv_name: string | null; conv_phone: string }
 >(`
   SELECT o.*, c.name as conv_name, c.phone as conv_phone
@@ -223,6 +231,11 @@ const stmtOrdersToCancel = db.prepare<
     AND o.status = 'PENDING_CONFIRMATION'
     AND o.reminder_count >= ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.conversation_id = o.conversation_id
+        AND m.created_at >= ?
+    )
   LIMIT 50
 `);
 
@@ -232,27 +245,40 @@ const stmtIncrementReminder = db.prepare<[number]>(
 
 /**
  * Pedidos SHOPIFY que necesitan un recordatorio ahora.
+ * Excluye pedidos donde hubo actividad de mensajes en las últimas `quietSec`
+ * segundos — si el cliente o el owner conversaron recientemente, no spam.
+ *
  * @param maxReminders cantidad máxima de recordatorios por pedido (default 2)
  * @param intervalSec  segundos mínimos entre recordatorios (default 7200 = 2h)
+ * @param quietSec     ventana de "actividad reciente" que vetea el recordatorio
+ *                     (default = intervalSec, o sea: si hubo cualquier mensaje
+ *                     en las últimas 2h, no recordamos)
  */
 export function getOrdersNeedingReminder(
   maxReminders = 2,
-  intervalSec = 7200
+  intervalSec = 7200,
+  quietSec = intervalSec
 ): Array<Order & { conv_name: string | null; conv_phone: string }> {
-  const threshold = Math.floor(Date.now() / 1000) - intervalSec;
-  return stmtOrdersNeedingReminder.all(maxReminders, threshold);
+  const now = Math.floor(Date.now() / 1000);
+  const threshold = now - intervalSec;
+  const quietThreshold = now - quietSec;
+  return stmtOrdersNeedingReminder.all(maxReminders, threshold, quietThreshold);
 }
 
 /**
  * Pedidos SHOPIFY que ya recibieron el máximo de recordatorios y pasó
  * el intervalo final sin confirmación — listos para cancelar.
+ * También respeta la ventana de quiet (no cancela si hay actividad reciente).
  */
 export function getOrdersToAutoCancel(
   maxReminders = 2,
-  intervalSec = 7200
+  intervalSec = 7200,
+  quietSec = intervalSec
 ): Array<Order & { conv_name: string | null; conv_phone: string }> {
-  const threshold = Math.floor(Date.now() / 1000) - intervalSec;
-  return stmtOrdersToCancel.all(maxReminders, threshold);
+  const now = Math.floor(Date.now() / 1000);
+  const threshold = now - intervalSec;
+  const quietThreshold = now - quietSec;
+  return stmtOrdersToCancel.all(maxReminders, threshold, quietThreshold);
 }
 
 export function incrementReminderCount(orderId: number): void {

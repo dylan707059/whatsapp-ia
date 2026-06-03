@@ -419,11 +419,12 @@ export function enqueueOutbox(
   content: string,
   scheduledAt = 0
 ): boolean {
-  // Dedup: si en los últimos 10 minutos ya pusimos exactamente este content
-  // en outbox para la misma conv, NO encolamos otra vez. Evita disparos
-  // duplicados desde flujos paralelos (Shopify webhook + IA, retry de webhook,
-  // etc.) y evita reenviar al cliente.
-  const since = Math.floor(Date.now() / 1000) - 600;
+  // Dedup: si en las últimas 24h ya pusimos exactamente este content en
+  // outbox para la misma conv, NO encolamos otra vez. Ventana ancha porque
+  // confirmaciones idénticas no deberían reenviarse JAMÁS dentro del día.
+  // Los recordatorios usan content distinto a la confirmación, así que no
+  // colisionan.
+  const since = Math.floor(Date.now() / 1000) - 86_400;
   const existing = stmtFindRecentOutbox.get(conversationId, content, since);
   if (existing) return false;
 

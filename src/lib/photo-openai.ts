@@ -2,7 +2,7 @@ import fs from "node:fs";
 import OpenAI from "openai";
 import type { ExtractedPhotoOrder } from "./types";
 
-const MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+const MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
 
 function getClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -15,7 +15,22 @@ function buildExtractionPrompt(phoneFromCommand?: string): string {
     ? `\n\nEl operador indicó que el teléfono del cliente es: ${phoneFromCommand}. Úsalo como referencia.`
     : "";
 
-  return `Analiza estas imágenes y extrae los datos del pedido.${phoneHint}
+  return `Eres un asistente experto en leer capturas de pantalla de pedidos de WhatsApp y formularios de ventas colombianos.
+
+Analiza TODAS las imágenes con mucho detalle y extrae los datos del pedido.${phoneHint}
+
+IMPORTANTE: Lee toda la imagen con cuidado. Los pedidos suelen tener campos como:
+- Nombre del cliente
+- Teléfono / celular
+- Producto (nombre del artículo, referencia, modelo)
+- Color / referencia de color
+- Talla / tamaño (XS, S, M, L, XL, XXL, número, etc.)
+- Cantidad (unidades pedidas)
+- Total / valor / precio (en pesos colombianos)
+- Método de pago (contraentrega, transferencia, etc.)
+- Dirección de entrega
+- Ciudad
+- Departamento
 
 Responde ÚNICAMENTE con JSON válido. Sin texto adicional. Sin markdown. Sin explicaciones.
 
@@ -41,14 +56,19 @@ Formato exacto:
 }
 
 Reglas estrictas:
-- No inventes datos. Si no ves el campo, déjalo vacío.
+- Lee TODO el texto visible en la imagen, incluyendo capturas de chat de WhatsApp.
+- No inventes datos. Si no ves el campo claramente, déjalo vacío.
 - phone debe ser colombiano normalizado: 57 + 10 dígitos. Ejemplo: 573147823790.
 - Si ves varios teléfonos, ponlos todos en detectedPhones. El más probable del cliente va en phone.
 - Si ves solo un teléfono, ponlo en phone Y en detectedPhones.
 - Separa nombre y apellido correctamente.
-- total sin decimales si termina en ,00. Ejemplo: $199.900 (no $199.900,00).
-- missingFields lista los campos obligatorios vacíos: nombre, teléfono, producto, color, talla, cantidad, total, dirección, ciudad, departamento.
-- confidence: "high" si todo claro, "medium" si hay dudas, "low" si muchas dudas.
+- product: escribe el nombre completo del producto tal como aparece en la imagen.
+- color: extrae el color aunque esté abreviado o en código.
+- size: extrae la talla aunque sea un número o código.
+- quantity: número de unidades pedidas.
+- total: valor en pesos colombianos, sin decimales si termina en ,00. Ejemplo: $199.900
+- missingFields lista los campos obligatorios que quedaron vacíos: nombre, teléfono, producto, color, talla, cantidad, total, dirección, ciudad, departamento.
+- confidence: "high" si extrajiste todos los campos obligatorios, "medium" si faltan 1-3, "low" si faltan más de 3.
 - Ciudad y departamento con mayúscula inicial.`;
 }
 

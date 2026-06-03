@@ -68,16 +68,29 @@ async function processMessage(
   const ownerPhone  = rawOwnerId.split(":")[0];
 
   // ─── Mensajes fromMe ─────────────────────────────────────────────────────
+  // Mensajes enviados desde el celular del dueño (no desde el bot/dashboard).
+  // Los guardamos como role="human" para que aparezcan en el dashboard, y
+  // pausamos la IA en esa conv para no responder en paralelo.
   if (msg.key?.fromMe) {
     const msgId: string = msg.key?.id ?? "";
-    if (isBotSentMessage(msgId)) return;
+    if (isBotSentMessage(msgId)) return; // skip ecos de mensajes que mando el bot
 
-    const conv = getConversationByPhone(jid, ownerPhone);
-    if (conv) {
-      const pauseUntil = Math.floor(Date.now() / 1000) + AI_PAUSE_MINUTES * 60;
-      setAiPausedUntil(conv.id, pauseUntil);
-      console.log(`[bot] IA pausada en ${jid} por ${AI_PAUSE_MINUTES} min`);
+    // Extraer texto si lo hay (puede ser imagen/audio/etc. y no tener texto)
+    const textFromMe: string | undefined =
+      msg.message?.conversation ??
+      msg.message?.extendedTextMessage?.text;
+
+    // Crear/obtener la conversación con el destinatario para guardarlo
+    const conv = getOrCreateConversation(jid, msg.pushName ?? null, ownerPhone);
+
+    if (textFromMe?.trim()) {
+      insertMessage(conv.id, "human", textFromMe.trim());
+      console.log(`[bot] ← (yo desde celular) a ${jid}: "${textFromMe.slice(0, 60)}"`);
     }
+
+    // Pausar IA en esta conv para no pisar al humano que está atendiendo manualmente
+    const pauseUntil = Math.floor(Date.now() / 1000) + AI_PAUSE_MINUTES * 60;
+    setAiPausedUntil(conv.id, pauseUntil);
     return;
   }
 
@@ -109,11 +122,17 @@ async function processMessage(
   console.log(`[bot] ← ${jid}: "${text}"`);
 
   // ─── Comandos del owner ───────────────────────────────────────────────────
+  // Los mensajes del owner se GUARDAN (para que aparezcan en el dashboard como
+  // historial), pero el bot solo ejecuta el comando si empieza con "/". Los
+  // mensajes normales del owner quedan visibles pero no disparan IA.
   if (isOwner) {
+    const ownerConv = getOrCreateConversation(jid, msg.pushName ?? `Owner +${senderPhone}`, ownerPhone);
+    insertMessage(ownerConv.id, "user", text);
+
     if (text.trim().startsWith("/")) {
       await handleOwnerCommand(sock, jid, senderPhone, text.trim());
     }
-    return; // Mensajes del owner sin slash: ignorar
+    return; // Mensajes del owner sin slash: solo se guardan, no se procesan
   }
 
   // ─── Bloqueo de cliente ───────────────────────────────────────────────────

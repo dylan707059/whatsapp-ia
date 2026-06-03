@@ -1,6 +1,6 @@
 import type { WASocket } from "@whiskeysockets/baileys";
 import type { OrderData } from "./types";
-import { setOwnerNotifiedAt } from "./db";
+import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
 import { enqueueOrderTask } from "./queue";
@@ -130,6 +130,11 @@ export async function sendOwnerNotificationSequentially(
   const summary = buildSummaryMessage(data, orderId);
   const copy    = buildCopyMessage(data, orderId);
 
+  // Inferir el owner_phone del bot a partir del socket — necesario para que la
+  // conversación del owner sea visible en el dashboard cuando este número está
+  // conectado.
+  const botOwnerPhone = (sock.user?.id ?? "").split(":")[0] ?? "";
+
   for (const phone of phones) {
     const jid = `${phone}@s.whatsapp.net`;
 
@@ -141,6 +146,16 @@ export async function sendOwnerNotificationSequentially(
       const r2 = await sock.sendMessage(jid, { text: copy });
       if (r2?.key?.id) registerBotMessage(r2.key.id);
       await sleep(1200);
+
+      // Guardar también las notificaciones en la conversación del owner
+      // dentro del dashboard, para que el usuario pueda ver lo que se envió.
+      try {
+        const ownerConv = getOrCreateConversation(jid, `Owner +${phone}`, botOwnerPhone);
+        insertMessage(ownerConv.id, "assistant", summary);
+        insertMessage(ownerConv.id, "assistant", copy);
+      } catch (err) {
+        console.warn(`[bot] No se pudo guardar notif en conv del owner ${phone}:`, err);
+      }
 
       console.log(`[bot] Notificación del pedido ${orderId ?? data.conversationId} enviada a ${phone}`);
     } catch (err) {

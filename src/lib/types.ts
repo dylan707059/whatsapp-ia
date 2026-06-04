@@ -65,6 +65,8 @@ export interface OutboxItem {
   sent: number;
   scheduled_at: number;
   message_id: number | null;
+  expires_at: number;
+  notify_owner: number;
   created_at: number;
 }
 

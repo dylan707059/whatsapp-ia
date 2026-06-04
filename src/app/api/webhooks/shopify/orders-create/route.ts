@@ -121,7 +121,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
     const rejMsgId = insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, rejMsgId);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, rejMsgId, scheduledAt + 300, true);
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por zona no cubierta (${zoneLabel}) — ` +
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
     const ofcMsgId = insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, ofcMsgId);
+    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, ofcMsgId, scheduledAt + 300, true);
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por dirección de oficina ` +
@@ -240,7 +240,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // envío real. El outbox respeta scheduled_at — solo dispara cuando llega
   // el momento, o cuando el handler entrante lo adelanta.
   const confMsgId = insertMessage(conv.id, "assistant", message);
-  enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId);
+  // Confirmación = una sola oportunidad: si no se envía dentro de la ventana
+  // (5 min tras su hora), se descarta y se avisa al dueño (notify_owner).
+  enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId, scheduledAt + 300, true);
 
   console.log(
     `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +

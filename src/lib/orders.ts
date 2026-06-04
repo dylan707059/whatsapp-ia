@@ -350,3 +350,12 @@ export function getOrdersToAutoCancel(
 export function incrementReminderCount(orderId: number): void {
   stmtIncrementReminder.run(orderId);
 }
+
+const stmtTouchReminder = db.prepare<[number]>(
+  "UPDATE orders SET last_reminder_at = unixepoch(), updated_at = unixepoch() WHERE id = ?"
+);
+/** Pospone la próxima elegibilidad de recordatorio sin contar un intento.
+ *  Se usa tras una caída: el dueño fue avisado, no spameamos al cliente. */
+export function touchOrderReminder(orderId: number): void {
+  stmtTouchReminder.run(orderId);
+}

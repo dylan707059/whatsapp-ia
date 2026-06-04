@@ -135,7 +135,15 @@ db.exec(`
     sent            INTEGER NOT NULL DEFAULT 0,
     scheduled_at    INTEGER NOT NULL DEFAULT 0,
     message_id      INTEGER,
+    expires_at      INTEGER NOT NULL DEFAULT 0,
+    notify_owner    INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  -- Estado clave/valor del proceso (ej: latido del bot para detectar caídas).
+  CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(sent, scheduled_at);
@@ -307,6 +315,12 @@ db.exec(`
   }
   if (!cols.includes("message_id")) {
     db.exec("ALTER TABLE outbox ADD COLUMN message_id INTEGER");
+  }
+  if (!cols.includes("expires_at")) {
+    db.exec("ALTER TABLE outbox ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.includes("notify_owner")) {
+    db.exec("ALTER TABLE outbox ADD COLUMN notify_owner INTEGER NOT NULL DEFAULT 0");
   }
 }
 {
@@ -489,8 +503,8 @@ export function setConnectionState(patch: {
 }
 
 // Outbox
-const stmtEnqueue = db.prepare<[number, string, string, number, number | null]>(
-  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at, message_id) VALUES (?, ?, ?, ?, ?)"
+const stmtEnqueue = db.prepare<[number, string, string, number, number | null, number, number]>(
+  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at, message_id, expires_at, notify_owner) VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
 const stmtPendingOutbox = db.prepare<[string, number], OutboxItem>(`
   SELECT o.* FROM outbox o
@@ -529,7 +543,9 @@ export function enqueueOutbox(
   phone: string,
   content: string,
   scheduledAt = 0,
-  messageId: number | null = null
+  messageId: number | null = null,
+  expiresAt = 0,
+  notifyOwner = false
 ): boolean {
   // Dedup: si en las últimas 24h ya pusimos exactamente este content en
   // outbox para la misma conv, NO encolamos otra vez.
@@ -537,8 +553,22 @@ export function enqueueOutbox(
   const existing = stmtFindRecentOutbox.get(conversationId, content, since);
   if (existing) return false;
 
-  stmtEnqueue.run(conversationId, phone, content, scheduledAt, messageId);
+  stmtEnqueue.run(conversationId, phone, content, scheduledAt, messageId, expiresAt, notifyOwner ? 1 : 0);
   return true;
+}
+
+// ─── Estado del proceso (latido para detectar caídas) ─────────────────────────
+const stmtGetAppState = db.prepare<[string], { value: string }>(
+  "SELECT value FROM app_state WHERE key = ?"
+);
+const stmtSetAppState = db.prepare<[string, string]>(
+  "INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+);
+export function getAppState(key: string): string | undefined {
+  return stmtGetAppState.get(key)?.value;
+}
+export function setAppState(key: string, value: string): void {
+  stmtSetAppState.run(key, value);
 }
 
 export function getPendingOutbox(ownerPhone: string, limit = 20): OutboxItem[] {

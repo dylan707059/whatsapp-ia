@@ -339,7 +339,13 @@ async function handleConfirmation(
     "Perfecto, tu pedido queda confirmado 💛\n\n" +
     "Ya lo pasamos a despacho. Te estaremos avisando cualquier novedad por este medio.";
   insertMessage(conversationId, "assistant", clientReply);
-  await botSend(sock, jid, clientReply);
+  // Una sola oportunidad: si falla, NO se reintenta y NO bloquea la
+  // notificación interna al dueño (que es la importante).
+  try {
+    await botSend(sock, jid, clientReply);
+  } catch (err) {
+    console.error(`[bot] No se pudo enviar "Perfecto" al cliente (no se reintenta):`, err);
+  }
 
   // Enviar notificación interna directamente (ya estamos dentro de la cola)
   const snapshot = { ...orderData };

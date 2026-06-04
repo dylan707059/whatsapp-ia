@@ -68,6 +68,8 @@ db.exec(`
     blocked_at       INTEGER,
     archived_at      INTEGER,
     pinned_at        INTEGER,
+    unread_count     INTEGER NOT NULL DEFAULT 0,
+    muted_at         INTEGER,
     UNIQUE(phone, owner_phone)
   );
 
@@ -98,7 +100,12 @@ db.exec(`
     content         TEXT NOT NULL,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
     wa_msg_id       TEXT,
-    wa_from_me      INTEGER NOT NULL DEFAULT 0
+    wa_from_me      INTEGER NOT NULL DEFAULT 0,
+    media_type      TEXT,
+    media_path      TEXT,
+    media_mime      TEXT,
+    media_filename  TEXT,
+    media_size      INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS revoke_queue (
@@ -137,6 +144,10 @@ db.exec(`
     message_id      INTEGER,
     expires_at      INTEGER NOT NULL DEFAULT 0,
     notify_owner    INTEGER NOT NULL DEFAULT 0,
+    media_type      TEXT,
+    media_path      TEXT,
+    media_mime      TEXT,
+    media_filename  TEXT,
     created_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -293,6 +304,8 @@ db.exec(`
   if (!cols.includes("owner_phone"))       db.exec("ALTER TABLE conversations ADD COLUMN owner_phone TEXT NOT NULL DEFAULT ''");
   if (!cols.includes("archived_at"))       db.exec("ALTER TABLE conversations ADD COLUMN archived_at INTEGER");
   if (!cols.includes("pinned_at"))         db.exec("ALTER TABLE conversations ADD COLUMN pinned_at INTEGER");
+  if (!cols.includes("unread_count"))      db.exec("ALTER TABLE conversations ADD COLUMN unread_count INTEGER NOT NULL DEFAULT 0");
+  if (!cols.includes("muted_at"))          db.exec("ALTER TABLE conversations ADD COLUMN muted_at INTEGER");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(orders)").all() as { name: string }[])
@@ -323,12 +336,21 @@ db.exec(`
   if (!cols.includes("notify_owner")) {
     db.exec("ALTER TABLE outbox ADD COLUMN notify_owner INTEGER NOT NULL DEFAULT 0");
   }
+  if (!cols.includes("media_type"))     db.exec("ALTER TABLE outbox ADD COLUMN media_type TEXT");
+  if (!cols.includes("media_path"))     db.exec("ALTER TABLE outbox ADD COLUMN media_path TEXT");
+  if (!cols.includes("media_mime"))     db.exec("ALTER TABLE outbox ADD COLUMN media_mime TEXT");
+  if (!cols.includes("media_filename")) db.exec("ALTER TABLE outbox ADD COLUMN media_filename TEXT");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(messages)").all() as { name: string }[])
     .map(c => c.name);
   if (!cols.includes("wa_msg_id"))  db.exec("ALTER TABLE messages ADD COLUMN wa_msg_id TEXT");
   if (!cols.includes("wa_from_me")) db.exec("ALTER TABLE messages ADD COLUMN wa_from_me INTEGER NOT NULL DEFAULT 0");
+  if (!cols.includes("media_type"))     db.exec("ALTER TABLE messages ADD COLUMN media_type TEXT");
+  if (!cols.includes("media_path"))     db.exec("ALTER TABLE messages ADD COLUMN media_path TEXT");
+  if (!cols.includes("media_mime"))     db.exec("ALTER TABLE messages ADD COLUMN media_mime TEXT");
+  if (!cols.includes("media_filename")) db.exec("ALTER TABLE messages ADD COLUMN media_filename TEXT");
+  if (!cols.includes("media_size"))     db.exec("ALTER TABLE messages ADD COLUMN media_size INTEGER");
 }
 {
   // account_connections pudo crearse en un deploy previo sin wanted_at.
@@ -386,7 +408,12 @@ const stmtSetMode = db.prepare<[string, number]>(
 const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
   SELECT
     c.*,
-    (SELECT content FROM messages
+    (SELECT CASE
+       WHEN media_type = 'image'    THEN '📷 ' || COALESCE(NULLIF(content,''), 'Foto')
+       WHEN media_type = 'video'    THEN '🎥 ' || COALESCE(NULLIF(content,''), 'Video')
+       WHEN media_type = 'document' THEN '📄 ' || COALESCE(NULLIF(media_filename,''), 'Documento')
+       ELSE content END
+     FROM messages
      WHERE conversation_id = c.id
      ORDER BY created_at DESC LIMIT 1) AS last_message_preview
   FROM conversations c
@@ -401,7 +428,12 @@ const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
 const stmtListArchivedConversations = db.prepare<[string], ConversationWithPreview>(`
   SELECT
     c.*,
-    (SELECT content FROM messages
+    (SELECT CASE
+       WHEN media_type = 'image'    THEN '📷 ' || COALESCE(NULLIF(content,''), 'Foto')
+       WHEN media_type = 'video'    THEN '🎥 ' || COALESCE(NULLIF(content,''), 'Video')
+       WHEN media_type = 'document' THEN '📄 ' || COALESCE(NULLIF(media_filename,''), 'Documento')
+       ELSE content END
+     FROM messages
      WHERE conversation_id = c.id
      ORDER BY created_at DESC LIMIT 1) AS last_message_preview
   FROM conversations c
@@ -506,8 +538,10 @@ export function setConnectionState(patch: {
 }
 
 // Outbox
-const stmtEnqueue = db.prepare<[number, string, string, number, number | null, number, number]>(
-  "INSERT INTO outbox (conversation_id, phone, content, scheduled_at, message_id, expires_at, notify_owner) VALUES (?, ?, ?, ?, ?, ?, ?)"
+const stmtEnqueue = db.prepare<[number, string, string, number, number | null, number, number, string | null, string | null, string | null, string | null]>(
+  `INSERT INTO outbox
+     (conversation_id, phone, content, scheduled_at, message_id, expires_at, notify_owner, media_type, media_path, media_mime, media_filename)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtPendingOutbox = db.prepare<[string, number], OutboxItem>(`
   SELECT o.* FROM outbox o
@@ -548,15 +582,22 @@ export function enqueueOutbox(
   scheduledAt = 0,
   messageId: number | null = null,
   expiresAt = 0,
-  notifyOwner = false
+  notifyOwner = false,
+  media: MediaInput | null = null
 ): boolean {
-  // Dedup: si en las últimas 24h ya pusimos exactamente este content en
-  // outbox para la misma conv, NO encolamos otra vez.
-  const since = Math.floor(Date.now() / 1000) - 86_400;
-  const existing = stmtFindRecentOutbox.get(conversationId, content, since);
-  if (existing) return false;
+  // Dedup SOLO para texto: si en las últimas 24h ya pusimos exactamente este
+  // content en outbox para la misma conv, NO encolamos otra vez. Los archivos
+  // multimedia siempre se encolan (cada envío es único).
+  if (!media) {
+    const since = Math.floor(Date.now() / 1000) - 86_400;
+    const existing = stmtFindRecentOutbox.get(conversationId, content, since);
+    if (existing) return false;
+  }
 
-  stmtEnqueue.run(conversationId, phone, content, scheduledAt, messageId, expiresAt, notifyOwner ? 1 : 0);
+  stmtEnqueue.run(
+    conversationId, phone, content, scheduledAt, messageId, expiresAt, notifyOwner ? 1 : 0,
+    media?.type ?? null, media?.path ?? null, media?.mime ?? null, media?.filename ?? null
+  );
   return true;
 }
 
@@ -672,6 +713,106 @@ export function insertMessageFull(
   fromMe: boolean
 ): number {
   return insertMessageWithWaTx(conversationId, role, content, waMsgId, fromMe);
+}
+
+// ─── Mensajes multimedia (foto / video / documento) ──────────────────────────
+export interface MediaInput {
+  type: string;             // 'image' | 'video' | 'document' | 'audio' | 'sticker'
+  path: string;             // ruta RELATIVA bajo MEDIA_DIR
+  mime: string | null;
+  filename: string | null;  // nombre original (para documentos)
+  size: number | null;
+}
+
+const stmtInsertMediaMsg = db.prepare<[number, string, string, string | null, number, string, string, string | null, string | null, number | null]>(
+  `INSERT INTO messages
+     (conversation_id, role, content, wa_msg_id, wa_from_me, media_type, media_path, media_mime, media_filename, media_size)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const insertMediaMessageTx = db.transaction(
+  (conversationId: number, role: string, caption: string, waMsgId: string | null, fromMe: boolean, media: MediaInput): number => {
+    const info = stmtInsertMediaMsg.run(
+      conversationId, role, caption, waMsgId, fromMe ? 1 : 0,
+      media.type, media.path, media.mime, media.filename, media.size
+    );
+    stmtUpdateLastMsg.run(conversationId);
+    return info.lastInsertRowid as number;
+  }
+);
+/** Inserta un mensaje con archivo multimedia. `caption` puede ir vacío. */
+export function insertMediaMessage(
+  conversationId: number,
+  role: MessageRole,
+  caption: string,
+  media: MediaInput,
+  waMsgId: string | null = null,
+  fromMe = false
+): number {
+  return insertMediaMessageTx(conversationId, role, caption, waMsgId, fromMe, media);
+}
+
+/** Fila completa de un mensaje, con columnas de media (para servir el archivo). */
+export interface MessageRow {
+  id: number; conversation_id: number; role: string; content: string;
+  created_at: number; wa_msg_id: string | null; wa_from_me: number;
+  media_type: string | null; media_path: string | null;
+  media_mime: string | null; media_filename: string | null; media_size: number | null;
+}
+const stmtGetMessageRow = db.prepare<[number], MessageRow>("SELECT * FROM messages WHERE id = ?");
+export function getMessageRow(id: number): MessageRow | undefined {
+  return stmtGetMessageRow.get(id);
+}
+
+// ─── No leídos (unread) ───────────────────────────────────────────────────────
+const stmtIncrementUnread = db.prepare<[number]>(
+  "UPDATE conversations SET unread_count = unread_count + 1 WHERE id = ?"
+);
+const stmtResetUnread = db.prepare<[number]>(
+  "UPDATE conversations SET unread_count = 0 WHERE id = ?"
+);
+export function incrementUnread(conversationId: number): void {
+  stmtIncrementUnread.run(conversationId);
+}
+export function resetUnread(conversationId: number): void {
+  stmtResetUnread.run(conversationId);
+}
+
+// ─── Silenciar (mute) por chat ────────────────────────────────────────────────
+const stmtSetMuted = db.prepare<[number]>(
+  "UPDATE conversations SET muted_at = unixepoch() WHERE id = ?"
+);
+const stmtSetUnmuted = db.prepare<[number]>(
+  "UPDATE conversations SET muted_at = NULL WHERE id = ?"
+);
+export function setConversationMuted(conversationId: number, muted: boolean): void {
+  if (muted) stmtSetMuted.run(conversationId);
+  else stmtSetUnmuted.run(conversationId);
+}
+
+// ─── Mensajes entrantes recientes (para notificaciones de escritorio) ─────────
+export interface IncomingNotice {
+  id: number;
+  conversation_id: number;
+  name: string | null;
+  phone: string;
+  content: string;
+  media_type: string | null;
+  muted: number;
+}
+const stmtIncomingSince = db.prepare<[string, number, number], IncomingNotice>(`
+  SELECT m.id, m.conversation_id, c.name, c.phone, m.content, m.media_type,
+         (c.muted_at IS NOT NULL) AS muted
+  FROM messages m
+  JOIN conversations c ON c.id = m.conversation_id
+  WHERE c.owner_phone = ?
+    AND m.id > ?
+    AND m.role = 'user'
+  ORDER BY m.id ASC
+  LIMIT ?
+`);
+export function getIncomingSince(ownerPhone: string, sinceId: number, limit = 20): IncomingNotice[] {
+  if (!ownerPhone) return [];
+  return stmtIncomingSince.all(ownerPhone, sinceId, limit);
 }
 
 /** Borra el mensaje SOLO de la DB local ("para mí"). */

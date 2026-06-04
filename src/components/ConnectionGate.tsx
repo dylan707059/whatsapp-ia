@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
@@ -11,6 +11,7 @@ import Sidebar, { type View } from "./Sidebar";
 import ConversationList from "./ConversationList";
 import ConversationPanel from "./ConversationPanel";
 import { useEventStream } from "./useEventStream";
+import { useDesktopNotifications } from "./useDesktopNotifications";
 
 type AppStatus = "loading" | "qr" | "connected";
 
@@ -22,6 +23,8 @@ export default function ConnectionGate() {
   const [archivedCount, setArchivedCount] = useState<number>(0);
   const [view, setView]                   = useState<View>("active");
   const [selectedId, setSelectedId]       = useState<number | null>(null);
+  const selectedIdRef                     = useRef<number | null>(null);
+  selectedIdRef.current = selectedId;
   const [search, setSearch]               = useState<string>("");
   const [labelFilter, setLabelFilter]     = useState<number | null>(null);
   // Pantalla de configuración: se abre con el botón ⚙️ del menú lateral.
@@ -55,12 +58,16 @@ export default function ConnectionGate() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appStatus, view]);
 
+  // Notificaciones de escritorio + sonido (se enganchan al mismo stream SSE).
+  const { perm: notifPerm, requestPerm: requestNotifPerm, onReady: onNotifReady, onMsg: onNotifMsg } =
+    useDesktopNotifications(selectedId);
+
   // SSE: push instantáneo de cambios desde el backend
   const onConvEvent = useCallback(() => { fetchConversations(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   const onConnEvent = useCallback(() => { checkStatus(); }, []);
   useEventStream(
     "/api/events",
-    { conv: onConvEvent, conn: onConnEvent },
+    { conv: onConvEvent, conn: onConnEvent, ready: onNotifReady, msg: onNotifMsg },
     appStatus === "connected"
   );
 
@@ -90,7 +97,17 @@ export default function ConnectionGate() {
         conversations: ConversationWithPreview[];
         archivedCount: number;
       };
-      setConversations(data.conversations);
+      // El chat abierto nunca debe mostrar no leídos: lo marcamos leído.
+      const sel = selectedIdRef.current;
+      let convs = data.conversations;
+      if (sel != null) {
+        const target = convs.find((c) => c.id === sel);
+        if (target && (target.unread_count ?? 0) > 0) {
+          convs = convs.map((c) => c.id === sel ? { ...c, unread_count: 0 } : c);
+          fetch(`/api/conversations/${sel}/read`, { method: "POST" }).catch(() => {});
+        }
+      }
+      setConversations(convs);
       setArchivedCount(data.archivedCount);
     } catch {}
     finally { setConvsLoaded(true); }
@@ -114,6 +131,32 @@ export default function ConnectionGate() {
 
   function handleModeChange(id: number, mode: ConversationMode) {
     setConversations((prev) => prev.map((c) => c.id === id ? { ...c, mode } : c));
+  }
+
+  // Al abrir un chat: marcarlo como leído (resetea el contador de no leídos).
+  function handleSelect(id: number) {
+    setSelectedId(id);
+    setConversations((prev) => prev.map((c) => c.id === id ? { ...c, unread_count: 0 } : c));
+    fetch(`/api/conversations/${id}/read`, { method: "POST" }).catch(() => {});
+  }
+
+  // Silenciar / reactivar el sonido de un chat. `muted` = estado actual.
+  async function handleMuteToggle(id: number, muted: boolean) {
+    setConversations((prev) => prev.map((c) =>
+      c.id === id ? { ...c, muted_at: muted ? null : Math.floor(Date.now() / 1000) } : c
+    ));
+    try { await fetch(`/api/conversations/${id}/mute`, { method: "POST" }); }
+    catch (err) { console.error("Error silenciando:", err); }
+  }
+
+  // Bloquear / desbloquear cliente. `blocked` = estado actual.
+  async function handleBlockToggle(id: number, blocked: boolean) {
+    if (!blocked && !confirm("¿Bloquear a este cliente? El bot dejará de responderle.")) return;
+    setConversations((prev) => prev.map((c) =>
+      c.id === id ? { ...c, blocked_at: blocked ? null : Math.floor(Date.now() / 1000) } : c
+    ));
+    try { await fetch(`/api/conversations/${id}/block`, { method: "POST" }); }
+    catch (err) { console.error("Error bloqueando:", err); }
   }
 
   function handleDelete(id: number) {
@@ -288,7 +331,7 @@ export default function ConnectionGate() {
       <ConversationList
         conversations={filtered}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={handleSelect}
         search={search}
         onSearch={setSearch}
         viewLabel={view === "archived" ? "Archivados" : "Mensajes"}
@@ -296,6 +339,8 @@ export default function ConnectionGate() {
         loading={!convsLoaded}
         onPinToggle={handlePinToggle}
         onArchiveToggle={handleArchiveToggle}
+        onMuteToggle={handleMuteToggle}
+        onBlockToggle={handleBlockToggle}
         onOrderAction={handleOrderAction}
       />
 
@@ -310,6 +355,31 @@ export default function ConnectionGate() {
           <EmptyState />
         )}
       </main>
+
+      {notifPerm === "default" && (
+        <button
+          onClick={requestNotifPerm}
+          style={{
+            position: "fixed",
+            bottom: 18,
+            right: 18,
+            zIndex: 2500,
+            padding: "10px 16px",
+            borderRadius: 24,
+            background: "var(--accent)",
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8
+          }}
+          title="Recibir aviso y sonido cuando llegue un mensaje nuevo"
+        >
+          🔔 Activar notificaciones
+        </button>
+      )}
     </div>
   );
 }

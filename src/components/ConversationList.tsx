@@ -16,6 +16,8 @@ interface Props {
   loading?: boolean;
   onPinToggle?: (id: number, pinned: boolean) => void;
   onArchiveToggle?: (id: number, archived: boolean) => void;
+  onMuteToggle?: (id: number, muted: boolean) => void;
+  onBlockToggle?: (id: number, blocked: boolean) => void;
   onOrderAction?: (conversationId: number, action: "dispatch" | "cancel") => void;
 }
 
@@ -255,6 +257,21 @@ export default function ConversationList(props: Props) {
               onClick={() => { props.onArchiveToggle!(menu.conv.id, !!menu.conv.archived_at); setMenu(null); }}
             />
           )}
+          {props.onMuteToggle && (
+            <MenuItem
+              label={menu.conv.muted_at ? "Reactivar sonido" : "Silenciar"}
+              icon={menu.conv.muted_at ? "🔔" : "🔕"}
+              onClick={() => { props.onMuteToggle!(menu.conv.id, !!menu.conv.muted_at); setMenu(null); }}
+            />
+          )}
+          {props.onBlockToggle && (
+            <MenuItem
+              label={menu.conv.blocked_at ? "Desbloquear" : "Bloquear"}
+              icon="🚫"
+              danger={!menu.conv.blocked_at}
+              onClick={() => { props.onBlockToggle!(menu.conv.id, !!menu.conv.blocked_at); setMenu(null); }}
+            />
+          )}
           {props.onOrderAction && (
             <>
               <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
@@ -333,6 +350,9 @@ const ChatRow = memo(ChatRowInner, (prev, next) => {
   if (prev.conv.mode !== next.conv.mode) return false;
   if (prev.conv.pinned_at !== next.conv.pinned_at) return false;
   if (prev.conv.name !== next.conv.name) return false;
+  if ((prev.conv.unread_count ?? 0) !== (next.conv.unread_count ?? 0)) return false;
+  if (prev.conv.muted_at !== next.conv.muted_at) return false;
+  if (prev.conv.blocked_at !== next.conv.blocked_at) return false;
   // Comparación de labels por id y nombre (las labels son inmutables salvo update raro)
   const prevLabels = prev.conv.labels ?? [];
   const nextLabels = next.conv.labels ?? [];
@@ -351,6 +371,8 @@ function ChatRowInner({
   const name = displayName(conv);
   const { seed, initials } = avatarSeedAndInitials(conv);
   const [g1, g2] = avatarColors(seed);
+  const unread = conv.unread_count ?? 0;
+  const muted = conv.muted_at != null;
 
   return (
     <button
@@ -376,9 +398,9 @@ function ChatRowInner({
     >
       <div
         style={{
-          width: 32, height: 32, borderRadius: 6,
+          width: 40, height: 40, borderRadius: "50%",
           display: "grid", placeItems: "center",
-          color: "#fff", fontWeight: 600, fontSize: 12,
+          color: "#fff", fontWeight: 600, fontSize: 13,
           background: `linear-gradient(135deg, ${g1}, ${g2})`,
           flexShrink: 0
         }}
@@ -411,7 +433,17 @@ function ChatRowInner({
           >
             {name}
           </span>
-          <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>
+          {muted && (
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }} title="Silenciado">🔇</span>
+          )}
+          <span
+            style={{
+              fontSize: 11,
+              color: unread > 0 ? "var(--accent)" : "var(--text-dim)",
+              fontWeight: unread > 0 ? 700 : 400,
+              flexShrink: 0
+            }}
+          >
             {relativeTime(conv.last_message_at)}
           </span>
         </div>
@@ -420,7 +452,8 @@ function ChatRowInner({
           <span
             style={{
               flex: 1, minWidth: 0,
-              color: "var(--text-muted)",
+              color: unread > 0 ? "var(--text)" : "var(--text-muted)",
+              fontWeight: unread > 0 ? 600 : 400,
               fontSize: 12.5,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -429,6 +462,25 @@ function ChatRowInner({
           >
             {conv.last_message_preview ?? "Sin mensajes"}
           </span>
+          {unread > 0 && (
+            <span
+              style={{
+                flexShrink: 0,
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                borderRadius: 9,
+                background: "var(--accent)",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 700,
+                display: "grid",
+                placeItems: "center"
+              }}
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
           <ModeBadge mode={conv.mode} />
         </div>
 

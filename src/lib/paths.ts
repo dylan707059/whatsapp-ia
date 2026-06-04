@@ -12,7 +12,11 @@ export const AUTH_DIR: string = process.env.AUTH_DIR
 export const DB_PATH       = path.join(DATA_DIR, "messages.db");
 export const RESTART_FLAG  = path.join(DATA_DIR, ".restart");
 
+// Carpeta de archivos multimedia (fotos, videos, documentos) en el disco
+// persistente. Cada conversación tiene su subcarpeta: MEDIA_DIR/<convId>/<file>.
+export const MEDIA_DIR     = path.join(DATA_DIR, "media");
+
 // Crear directorios necesarios al importar este módulo
-for (const dir of [DATA_DIR, AUTH_DIR]) {
+for (const dir of [DATA_DIR, AUTH_DIR, MEDIA_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }

@@ -26,6 +26,8 @@ export interface Conversation {
   owner_phone: string;
   archived_at: number | null;
   pinned_at: number | null;
+  unread_count?: number;
+  muted_at?: number | null;
 }
 
 export interface LabelLite {
@@ -47,6 +49,12 @@ export interface Message {
   created_at: number;
   wa_msg_id?: string | null;
   wa_from_me?: number;
+  // Multimedia (null/undefined = mensaje de solo texto)
+  media_type?: string | null;       // 'image' | 'video' | 'document' | 'audio' | 'sticker'
+  media_path?: string | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
+  media_size?: number | null;
 }
 
 export interface ConnectionState {
@@ -67,6 +75,10 @@ export interface OutboxItem {
   message_id: number | null;
   expires_at: number;
   notify_owner: number;
+  media_type?: string | null;
+  media_path?: string | null;
+  media_mime?: string | null;
+  media_filename?: string | null;
   created_at: number;
 }
 

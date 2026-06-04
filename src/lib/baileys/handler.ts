@@ -4,6 +4,8 @@ import {
   getConversationById,
   getConversationByPhone,
   insertMessage,
+  insertMediaMessage,
+  incrementUnread,
   getRecentHistory,
   setConfirmedAt,
   setAiPausedUntil,
@@ -14,6 +16,7 @@ import {
   deleteConversation,
   isAutomationPausedForPhone
 } from "../db";
+import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
 import { generateReply } from "../openai";
 import {
@@ -75,17 +78,30 @@ async function processMessage(
     const msgId: string = msg.key?.id ?? "";
     if (isBotSentMessage(msgId)) return; // skip ecos de mensajes que mando el bot
 
-    // Extraer texto si lo hay (puede ser imagen/audio/etc. y no tener texto)
-    const textFromMe: string | undefined =
-      msg.message?.conversation ??
-      msg.message?.extendedTextMessage?.text;
-
     // Crear/obtener la conversación con el destinatario para guardarlo
     const conv = getOrCreateConversation(jid, msg.pushName ?? null, ownerPhone);
 
-    if (textFromMe?.trim()) {
-      insertMessage(conv.id, "human", textFromMe.trim());
-      console.log(`[bot] ← (yo desde celular) a ${jid}: "${textFromMe.slice(0, 60)}"`);
+    // Multimedia enviada desde el celular → reflejarla en el panel.
+    const fromMeMedia = detectMedia(msg.message);
+    if (fromMeMedia && fromMeMedia.kind !== "audio" && fromMeMedia.kind !== "sticker") {
+      try {
+        const saved = await saveIncomingMedia(sock, msg, conv.id);
+        if (saved) {
+          insertMediaMessage(conv.id, "human", saved.caption, saved.media, msgId || null, true);
+          console.log(`[bot] ← (yo desde celular) a ${jid}: [${saved.kind}]`);
+        }
+      } catch (err) {
+        console.error("[bot] Error guardando media fromMe:", err);
+      }
+    } else {
+      // Texto (o tipos no soportados): guardamos el texto si lo hay.
+      const textFromMe: string | undefined =
+        msg.message?.conversation ??
+        msg.message?.extendedTextMessage?.text;
+      if (textFromMe?.trim()) {
+        insertMessage(conv.id, "human", textFromMe.trim());
+        console.log(`[bot] ← (yo desde celular) a ${jid}: "${textFromMe.slice(0, 60)}"`);
+      }
     }
 
     // Pausar IA en esta conv para no pisar al humano que está atendiendo manualmente
@@ -102,24 +118,27 @@ async function processMessage(
     console.log(`[handler] LID sin resolver: ${jid} → senderPhone=${senderPhone} | pushName=${msg.pushName} | ownerPhones=${ownerPhones.join(",")}`);
   }
 
-  // ─── Imágenes: se ignoran (los pedidos entran por el webhook de Shopify) ──
-  if (msg.message?.imageMessage) return;
+  // ─── Multimedia entrante + texto ──────────────────────────────────────────
+  // Las fotos/videos/documentos del cliente se descargan y se muestran en el
+  // panel (antes se perdían). Audios/stickers quedan como placeholder de texto.
+  const incomingMedia = detectMedia(msg.message);
 
-  // ─── Extraer texto ────────────────────────────────────────────────────────
   const text: string | undefined =
     msg.message?.conversation ??
     msg.message?.extendedTextMessage?.text;
 
-  if (!text?.trim()) return;
+  // Nada útil (ni texto ni media): salir.
+  if (!text?.trim() && !incomingMedia) return;
 
   const pushName: string | undefined = msg.pushName;
-  console.log(`[bot] ← ${jid}: "${text}"`);
+  console.log(`[bot] ← ${jid}: ${text ? `"${text}"` : `[${incomingMedia?.kind}]`}`);
 
   // ─── Comandos del owner ───────────────────────────────────────────────────
   // Los mensajes del owner se GUARDAN (para que aparezcan en el dashboard como
   // historial), pero el bot solo ejecuta el comando si empieza con "/". Los
   // mensajes normales del owner quedan visibles pero no disparan IA.
   if (isOwner) {
+    if (!text?.trim()) return; // media del owner: se ignora
     const ownerConv = getOrCreateConversation(jid, msg.pushName ?? `Owner +${senderPhone}`, ownerPhone);
     insertMessage(ownerConv.id, "user", text);
 
@@ -161,7 +180,17 @@ async function processMessage(
       convo = shopifyConv;
     }
   }
-  insertMessage(convo.id, "user", text);
+
+  // ─── Multimedia del cliente: descargar, guardar y mostrar en el panel ─────
+  // (Se maneja aparte del texto; un mensaje con archivo no dispara IA ni se
+  //  interpreta como confirmación.)
+  if (incomingMedia) {
+    await handleIncomingMedia(sock, msg, convo.id, incomingMedia.kind);
+    return;
+  }
+
+  insertMessage(convo.id, "user", text!);
+  incrementUnread(convo.id);
 
   // ─── Interruptor de automatización (botón de pánico) ──────────────────────
   // Si el owner apagó la automatización, guardamos el mensaje (para que lo vea
@@ -384,6 +413,42 @@ async function handleComplaint(
       console.error(`[bot] Error enviando alerta de reclamo a ${phone}:`, err);
     }
   }
+}
+
+// ─── Multimedia entrante ────────────────────────────────────────────────────
+
+async function handleIncomingMedia(
+  sock: WASocket,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  msg: any,
+  conversationId: number,
+  kind: MediaKind
+): Promise<void> {
+  // Audio y stickers: no se descargan — guardamos un placeholder visible.
+  if (kind === "audio" || kind === "sticker") {
+    const label = kind === "audio" ? "🎤 Nota de voz" : "🌟 Sticker";
+    insertMessage(conversationId, "user", label);
+    incrementUnread(conversationId);
+    advancePendingOutbox(conversationId);
+    return;
+  }
+
+  let saved: Awaited<ReturnType<typeof saveIncomingMedia>> = null;
+  try {
+    saved = await saveIncomingMedia(sock, msg, conversationId);
+  } catch (err) {
+    console.error("[bot] Error descargando media entrante:", err);
+  }
+
+  if (saved) {
+    insertMediaMessage(conversationId, "user", saved.caption, saved.media);
+  } else {
+    // No se pudo descargar (muy grande o error): placeholder con el tipo.
+    const label = kind === "image" ? "📷 Foto" : kind === "video" ? "🎥 Video" : "📄 Documento";
+    insertMessage(conversationId, "user", `${label} (no se pudo descargar)`);
+  }
+  incrementUnread(conversationId);
+  advancePendingOutbox(conversationId);
 }
 
 // ─── Helper ────────────────────────────────────────────────────────────────────

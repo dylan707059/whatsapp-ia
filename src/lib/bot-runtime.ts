@@ -18,8 +18,10 @@ import {
 import { insertOrderEvent } from "./order-events";
 import { getOwnerNotifyPhones } from "./owner-notifier";
 import { registerBotMessage } from "./bot-messages";
-import { AUTH_DIR, DATA_DIR } from "./paths";
+import { buildOutgoingMediaContent } from "./baileys/media";
+import { AUTH_DIR, DATA_DIR, MEDIA_DIR } from "./paths";
 import type { OutboxItem } from "./types";
+import type { AnyMessageContent } from "@whiskeysockets/baileys";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const WANTED_WINDOW_SEC      = 120;
@@ -196,10 +198,31 @@ export function startBotRuntime(): void {
         }
         if (!claimOutboxItem(item.id)) continue;
         try {
-          const result = await h.sock.sendMessage(item.phone, { text: item.content });
+          let content: AnyMessageContent;
+          if (item.media_type && item.media_path) {
+            const absPath = path.join(MEDIA_DIR, item.media_path);
+            if (!fs.existsSync(absPath)) {
+              console.error(`[bot] Outbox #${item.id}: archivo no existe (${absPath}) — descartado`);
+              continue; // ya está claimeado (sent=1): no se reintenta
+            }
+            content = buildOutgoingMediaContent({
+              absPath,
+              type: item.media_type,
+              mime: item.media_mime ?? null,
+              filename: item.media_filename ?? null,
+              caption: item.content ?? ""
+            });
+          } else {
+            content = { text: item.content };
+          }
+          const result = await h.sock.sendMessage(item.phone, content);
           const waMsgId = result?.key?.id;
-          if (waMsgId && item.message_id) {
-            try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
+          if (waMsgId) {
+            // Registrar el id para que el eco fromMe NO se vuelva a guardar/descargar.
+            registerBotMessage(waMsgId);
+            if (item.message_id) {
+              try { setMessageWaId(item.message_id, waMsgId, true); } catch {}
+            }
           }
         } catch (err) {
           console.error(`[bot] (acc ${h.accountId}) Error enviando outbox #${item.id}, revirtiendo:`, err);

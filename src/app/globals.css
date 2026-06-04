@@ -1,60 +1,61 @@
 @import "tailwindcss";
 
-/* ─── Sistema de tokens · Linear Minimal ────────────────────────────────────── */
+/* ─── Sistema de tokens · WhatsApp Web Business ──────────────────────────────── */
 :root {
-  --accent: #5e6ad2;
-  --accent-soft: rgba(94, 106, 210, 0.14);
-  --accent-strong: #4751b8;
-  --radius: 6px;
-  --radius-sm: 4px;
-  --radius-lg: 10px;
-  --font-sans: "Inter", ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --accent: #00a884;
+  --accent-soft: rgba(0, 168, 132, 0.16);
+  --accent-strong: #008069;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Helvetica, "Apple Color Emoji", Arial, sans-serif;
 }
 
-/* Dark theme (default) */
+/* Dark theme (default) — paleta WhatsApp Web oscuro */
 :root,
 [data-theme="dark"] {
-  --bg: #08090a;
-  --bg-elev: #0c0d0f;
-  --bg-elev-2: #131418;
-  --bg-hover: #1a1b1f;
-  --bg-active: #1f2027;
-  --border: #1f1f25;
-  --border-strong: #2a2a32;
-  --text: #f4f4f5;
-  --text-muted: #94949a;
-  --text-dim: #5d5d65;
-  --bubble-out: #1f2027;
-  --bubble-in: #131418;
-  --bubble-system: #131418;
-  --success: #46d39a;
-  --success-soft: rgba(70, 211, 154, 0.14);
-  --warning: #ffb547;
-  --warning-soft: rgba(255, 181, 71, 0.14);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.14);
+  --bg: #0b141a;
+  --bg-elev: #111b21;
+  --bg-elev-2: #202c33;
+  --bg-hover: #202c33;
+  --bg-active: #2a3942;
+  --border: #222d34;
+  --border-strong: #2a3942;
+  --text: #e9edef;
+  --text-muted: #8696a0;
+  --text-dim: #667781;
+  --bubble-out: #005c4f;
+  --bubble-in: #202c33;
+  --bubble-system: #182229;
+  --success: #00a884;
+  --success-soft: rgba(0, 168, 132, 0.16);
+  --warning: #ffb02e;
+  --warning-soft: rgba(255, 176, 46, 0.16);
+  --danger: #f15c6d;
+  --danger-soft: rgba(241, 92, 109, 0.16);
 }
 
+/* Light theme — paleta WhatsApp Web claro */
 [data-theme="light"] {
-  --bg: #fcfcfd;
+  --bg: #efeae2;
   --bg-elev: #ffffff;
-  --bg-elev-2: #f5f6f8;
-  --bg-hover: #f0f1f4;
-  --bg-active: #ebecf0;
-  --border: #e6e7ec;
-  --border-strong: #d2d4dc;
-  --text: #0a0a0b;
-  --text-muted: #585864;
-  --text-dim: #8e8e98;
-  --bubble-out: #ebecf0;
+  --bg-elev-2: #f0f2f5;
+  --bg-hover: #f5f6f6;
+  --bg-active: #f0f2f5;
+  --border: #e9edef;
+  --border-strong: #d1d7db;
+  --text: #111b21;
+  --text-muted: #667781;
+  --text-dim: #8696a0;
+  --bubble-out: #d9fdd3;
   --bubble-in: #ffffff;
-  --bubble-system: #f5f6f8;
-  --success: #16a34a;
-  --success-soft: rgba(22, 163, 74, 0.12);
-  --warning: #d97706;
-  --warning-soft: rgba(217, 119, 6, 0.12);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.12);
+  --bubble-system: #ffffff;
+  --success: #008069;
+  --success-soft: rgba(0, 128, 105, 0.12);
+  --warning: #b88217;
+  --warning-soft: rgba(184, 130, 23, 0.14);
+  --danger: #e02e3d;
+  --danger-soft: rgba(224, 46, 61, 0.12);
 }
 
 * { box-sizing: border-box; }
@@ -134,6 +135,37 @@ textarea:focus-visible {
   50%      { opacity: 0.4; }
 }
 .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+/* ─── Fondo de chat estilo WhatsApp (wallpaper con patrón sutil) ──────────────── */
+.chat-wallpaper {
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='1' fill='%238696a0' fill-opacity='0.09'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+/* ─── Burbujas de mensaje con "cola" (tail) estilo WhatsApp ───────────────────── */
+.bubble { position: relative; }
+
+.bubble-in::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 8px;
+  height: 13px;
+  background: var(--bubble-in);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+.bubble-out::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 8px;
+  height: 13px;
+  background: var(--bubble-out);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
 
 /* Utility classes para usar tokens en JSX */
 .bg-surface       { background: var(--bg); }

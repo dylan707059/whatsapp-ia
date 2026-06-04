@@ -15,6 +15,21 @@ interface Props {
   onDelete: (id: number) => void;
 }
 
+type AttachKind = "image" | "video" | "document";
+interface Attached {
+  file: File;
+  url: string;       // object URL para la previa
+  kind: AttachKind;
+}
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+function attachKind(file: File): AttachKind | null {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type === "application/pdf") return "document";
+  return null;
+}
+
 const AVATAR_GRADIENTS = [
   ["#5e6ad2", "#4751b8"], ["#46d39a", "#2da776"], ["#f472b6", "#c83a8e"],
   ["#ffb547", "#c98326"], ["#60a5fa", "#3b82f6"], ["#a78bfa", "#8b5cf6"],
@@ -43,10 +58,18 @@ export default function ConversationPanel({
   const [sending, setSending]     = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [infoOpen, setInfoOpen]     = useState(false);
+  const [attached, setAttached]   = useState<Attached | null>(null);
+  const [dragOver, setDragOver]   = useState(false);
+  const fileInputRef              = useRef<HTMLInputElement>(null);
   const bottomRef                 = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMode(conversation.mode);
+    setInput("");
+    setAttached((prev) => {
+      if (prev) { try { URL.revokeObjectURL(prev.url); } catch {} }
+      return null;
+    });
     fetchMessages();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id]);
@@ -123,6 +146,68 @@ export default function ConversationPanel({
     }
   }
 
+  function onFilePicked(file: File | null | undefined) {
+    if (!file) return;
+    const kind = attachKind(file);
+    if (!kind) { alert("Solo se permiten fotos, videos o PDF."); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { alert("El archivo supera el límite de 20 MB."); return; }
+    if (attached) { try { URL.revokeObjectURL(attached.url); } catch {} }
+    setAttached({ file, url: URL.createObjectURL(file), kind });
+  }
+
+  function clearAttached() {
+    if (attached) { try { URL.revokeObjectURL(attached.url); } catch {} }
+    setAttached(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    const f = e.clipboardData?.files?.[0];
+    if (f && attachKind(f)) { e.preventDefault(); onFilePicked(f); }
+  }
+
+  async function handleSendMedia() {
+    if (!attached || sending) return;
+    const caption = input.trim();
+    const { file, kind, url: previewUrl } = attached;
+    setSending(true);
+    setInput("");
+    setAttached(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    const tempId = -Date.now();
+    const optimistic = {
+      id: tempId,
+      conversation_id: conversation.id,
+      role: "human",
+      content: caption,
+      created_at: Math.floor(Date.now() / 1000),
+      media_type: kind,
+      localPreviewUrl: previewUrl
+    } as Message & { localPreviewUrl?: string };
+    setMessages((prev) => [...prev, optimistic]);
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (caption) fd.append("caption", caption);
+      const res = await fetch(`/api/messages/${conversation.id}`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchMessages();
+    } catch (err) {
+      console.error("[ui] Error enviando archivo:", err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId
+          ? ({ ...m, content: "❌ FALLÓ ENVIAR ARCHIVO", media_type: null } as Message)
+          : m
+        ))
+      );
+    } finally {
+      setSending(false);
+      setTimeout(() => { try { URL.revokeObjectURL(previewUrl); } catch {} }, 15000);
+    }
+  }
+
   async function handleDelete() {
     const display = conversation.name || jidToDisplay(conversation.phone);
     if (!confirm(`¿Borrar la conversación con ${display}? Esta acción no se puede deshacer.`)) return;
@@ -139,7 +224,21 @@ export default function ConversationPanel({
   const initials = initialsOf(name);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)", position: "relative" }}
+      onDragOver={(e) => { if (mode === "HUMAN") { e.preventDefault(); if (!dragOver) setDragOver(true); } }}
+      onDragLeave={(e) => {
+        // solo ocultar si el cursor salió del panel (no al pasar sobre hijos)
+        if (e.relatedTarget && (e.currentTarget as Node).contains(e.relatedTarget as Node)) return;
+        setDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (mode !== "HUMAN") return;
+        e.preventDefault();
+        setDragOver(false);
+        onFilePicked(e.dataTransfer?.files?.[0]);
+      }}
+    >
       {/* Header */}
       <div
         style={{
@@ -153,7 +252,7 @@ export default function ConversationPanel({
       >
         <div
           style={{
-            width: 36, height: 36, borderRadius: 6,
+            width: 38, height: 38, borderRadius: "50%",
             background: `linear-gradient(135deg, ${g1}, ${g2})`,
             display: "grid", placeItems: "center",
             color: "#fff", fontWeight: 600, fontSize: 13,
@@ -228,6 +327,7 @@ export default function ConversationPanel({
 
       {/* Messages */}
       <div
+        className="chat-wallpaper"
         style={{
           flex: 1,
           overflowY: "auto",
@@ -256,6 +356,10 @@ export default function ConversationPanel({
             role={msg.role}
             content={msg.content}
             createdAt={msg.created_at}
+            mediaType={msg.media_type}
+            mediaMime={msg.media_mime}
+            mediaFilename={msg.media_filename}
+            localPreviewUrl={(msg as Message & { localPreviewUrl?: string }).localPreviewUrl}
             canDeleteForEveryone={msg.wa_from_me === 1 && !!msg.wa_msg_id}
             onDelete={async (mode) => {
               if (msg.id < 0) return; // optimistic, ignorar
@@ -270,87 +374,136 @@ export default function ConversationPanel({
       </div>
 
       {/* Composer */}
-      <div
-        style={{
-          padding: "10px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg-elev)",
-          display: "flex",
-          alignItems: "center",
-          gap: 8
-        }}
-      >
+      <div style={{ borderTop: "1px solid var(--border)", background: "var(--bg-elev)" }}>
         {mode === "AI" ? (
           <div
             style={{
-              flex: 1,
               textAlign: "center",
               fontSize: 12,
               color: "var(--text-muted)",
-              padding: "8px 12px"
+              padding: "14px 12px"
             }}
           >
             🤖 El bot responde automáticamente en modo IA — cambia a HUMAN para escribir manualmente
           </div>
         ) : (
           <>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder={`Mensaje a ${name.split(" ")[0]}...`}
-              disabled={sending}
-              style={{
-                flex: 1,
-                background: "var(--bg-elev-2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                padding: "8px 12px",
-                color: "var(--text)",
-                fontSize: 13.5,
-                fontFamily: "inherit",
-                outline: 0,
-                opacity: sending ? 0.5 : 1
-              }}
-            />
-            <button
-              onClick={handleSend}
-              disabled={sending || !input.trim()}
-              style={{
-                padding: "7px 14px",
-                background: input.trim() ? "var(--accent)" : "var(--bg-elev-2)",
-                color: input.trim() ? "#fff" : "var(--text-dim)",
-                borderRadius: "var(--radius)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                transition: "all 0.1s"
-              }}
-            >
-              Enviar
-              <span
+            {/* Bandeja de previa del adjunto */}
+            {attached && (
+              <div
                 style={{
-                  fontSize: 10,
-                  opacity: 0.8,
-                  padding: "0 4px",
-                  background: input.trim() ? "rgba(255,255,255,0.18)" : "transparent",
-                  borderRadius: 3
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--border)"
                 }}
               >
-                ↵
-              </span>
-            </button>
+                {attached.kind === "image" && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={attached.url} alt="previa" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 6 }} />
+                )}
+                {attached.kind === "video" && (
+                  <video src={attached.url} style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 6, background: "#000" }} />
+                )}
+                {attached.kind === "document" && <span style={{ fontSize: 30 }}>📄</span>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {attached.file.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                    {(attached.file.size / 1024 / 1024).toFixed(1)} MB · listo para enviar
+                  </div>
+                </div>
+                <button onClick={clearAttached} title="Quitar" style={{ color: "var(--text-dim)", fontSize: 16, padding: 6 }}>✕</button>
+              </div>
+            )}
+
+            {/* Fila de escritura */}
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*,application/pdf"
+                style={{ display: "none" }}
+                onChange={(e) => onFilePicked(e.target.files?.[0])}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                title="Adjuntar foto, video o PDF"
+                disabled={sending}
+                style={{ width: 34, height: 34, borderRadius: "var(--radius)", display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 17, flexShrink: 0 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                📎
+              </button>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onPaste={onPaste}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (attached) handleSendMedia(); else handleSend();
+                  }
+                }}
+                placeholder={attached ? "Agrega un comentario..." : `Mensaje a ${name.split(" ")[0]}...`}
+                disabled={sending}
+                style={{
+                  flex: 1,
+                  background: "var(--bg-elev-2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  padding: "9px 13px",
+                  color: "var(--text)",
+                  fontSize: 13.5,
+                  fontFamily: "inherit",
+                  outline: 0,
+                  opacity: sending ? 0.5 : 1
+                }}
+              />
+              <button
+                onClick={() => { if (attached) handleSendMedia(); else handleSend(); }}
+                disabled={sending || (!attached && !input.trim())}
+                title="Enviar"
+                style={{
+                  width: 38, height: 38,
+                  borderRadius: "50%",
+                  background: (attached || input.trim()) ? "var(--accent)" : "var(--bg-elev-2)",
+                  color: (attached || input.trim()) ? "#fff" : "var(--text-dim)",
+                  display: "grid", placeItems: "center",
+                  fontSize: 16, flexShrink: 0,
+                  transition: "all 0.1s"
+                }}
+              >
+                ➤
+              </button>
+            </div>
           </>
         )}
       </div>
+
+      {/* Overlay de arrastrar y soltar */}
+      {dragOver && mode === "HUMAN" && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "var(--accent-soft)",
+            border: "2px dashed var(--accent)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 50,
+            pointerEvents: "none"
+          }}
+        >
+          <span style={{ color: "var(--accent)", fontSize: 15, fontWeight: 600 }}>
+            📎 Suelta para adjuntar
+          </span>
+        </div>
+      )}
     </div>
   );
 }

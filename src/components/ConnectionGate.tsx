@@ -6,6 +6,7 @@ import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
 import SettingsScreen from "./SettingsScreen";
 import AccountsScreen from "./AccountsScreen";
+import PedidosScreen from "./PedidosScreen";
 import Sidebar, { type View } from "./Sidebar";
 import ConversationList from "./ConversationList";
 import ConversationPanel from "./ConversationPanel";
@@ -26,6 +27,7 @@ export default function ConnectionGate() {
   // Pantalla de configuración: se abre con el botón ⚙️ del menú lateral.
   const [showSettings, setShowSettings]   = useState<boolean>(false);
   const [showAccounts, setShowAccounts]   = useState<boolean>(false);
+  const [showPedidos, setShowPedidos]     = useState<boolean>(false);
 
   const router = useRouter();
 
@@ -188,6 +190,20 @@ export default function ConnectionGate() {
     return <AccountsScreen onClose={() => setShowAccounts(false)} />;
   }
 
+  // Panel de pedidos (se abre desde el botón 📋 Pedidos).
+  if (showPedidos) {
+    return (
+      <PedidosScreen
+        onClose={() => setShowPedidos(false)}
+        onOpenConversation={(convId) => {
+          setShowPedidos(false);
+          setView("active");
+          setSelectedId(convId);
+        }}
+      />
+    );
+  }
+
   // Antes de conectar WhatsApp: panel de configuración a la izquierda + QR a la
   // derecha. Al conectar, este layout desaparece y se muestra el dashboard.
   if (appStatus === "qr") {
@@ -244,6 +260,7 @@ export default function ConnectionGate() {
         onDisconnect={handleDisconnect}
         onOpenSettings={() => setShowSettings(true)}
         onOpenAccounts={() => setShowAccounts(true)}
+        onOpenPedidos={() => setShowPedidos(true)}
         onLogout={handleLogout}
         onLabelFilter={setLabelFilter}
         activeLabelFilter={labelFilter}

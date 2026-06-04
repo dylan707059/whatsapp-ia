@@ -22,6 +22,7 @@ interface Props {
   onDisconnect: () => void;
   onOpenSettings?: () => void;
   onOpenAccounts?: () => void;
+  onOpenPedidos?: () => void;
   onLogout?: () => void;
   onLabelFilter?: (labelId: number | null) => void;
   activeLabelFilter?: number | null;
@@ -161,6 +162,13 @@ export default function Sidebar(props: Props) {
 
       {/* Vistas principales */}
       <div style={{ marginTop: 6 }}>
+        {props.onOpenPedidos && (
+          <NavItem
+            icon="📋"
+            label="Pedidos"
+            onClick={props.onOpenPedidos}
+          />
+        )}
         <NavItem
           icon="💬"
           label="Activos"

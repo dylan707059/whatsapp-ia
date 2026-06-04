@@ -192,6 +192,68 @@ export function getTodayStats(): TodayStats {
   return stmtTodayStats.get() as TodayStats;
 }
 
+// ─── Panel de Pedidos (por cuenta) ────────────────────────────────────────────
+
+export type OrderWithConv = Order & { conv_name: string | null; conv_phone: string };
+
+const stmtListByOwner = db.prepare<[string], OrderWithConv>(`
+  SELECT o.*, c.name AS conv_name, c.phone AS conv_phone
+  FROM orders o
+  JOIN conversations c ON c.id = o.conversation_id
+  WHERE c.owner_phone = ? AND o.status != 'DRAFT'
+  ORDER BY o.created_at DESC
+  LIMIT 300
+`);
+
+/** Lista los pedidos (no borradores) de la cuenta dueña, recientes primero. */
+export function listOrdersForOwner(ownerPhone: string): OrderWithConv[] {
+  if (!ownerPhone) return [];
+  return stmtListByOwner.all(ownerPhone);
+}
+
+export interface OwnerOrderStats {
+  pending: number;
+  confirmed: number;
+  dispatched: number;
+  total: number;
+}
+
+const stmtTodayByOwner = db.prepare<[string], OwnerOrderStats>(`
+  SELECT
+    SUM(CASE WHEN status='PENDING_CONFIRMATION' THEN 1 ELSE 0 END) AS pending,
+    SUM(CASE WHEN status IN ('CONFIRMED','OWNER_NOTIFIED') THEN 1 ELSE 0 END) AS confirmed,
+    SUM(CASE WHEN status='DISPATCHED' THEN 1 ELSE 0 END) AS dispatched,
+    COUNT(*) AS total
+  FROM orders o
+  JOIN conversations c ON c.id = o.conversation_id
+  WHERE c.owner_phone = ?
+    AND date(o.created_at,'unixepoch','localtime') = date('now','localtime')
+    AND o.status NOT IN ('CANCELLED','DRAFT')
+`);
+
+/** Conteos de pedidos de HOY para la cuenta dueña. */
+export function getTodayStatsForOwner(ownerPhone: string): OwnerOrderStats {
+  const r = stmtTodayByOwner.get(ownerPhone);
+  return {
+    pending: r?.pending ?? 0,
+    confirmed: r?.confirmed ?? 0,
+    dispatched: r?.dispatched ?? 0,
+    total: r?.total ?? 0
+  };
+}
+
+const stmtOrderWithOwner = db.prepare<[number], Order & { conv_owner: string }>(`
+  SELECT o.*, c.owner_phone AS conv_owner
+  FROM orders o
+  JOIN conversations c ON c.id = o.conversation_id
+  WHERE o.id = ?
+`);
+
+/** Pedido + owner_phone de su conversación (para verificar dueño antes de tocarlo). */
+export function getOrderWithOwner(orderId: number): (Order & { conv_owner: string }) | undefined {
+  return stmtOrderWithOwner.get(orderId);
+}
+
 // ─── Recordatorios SHOPIFY ────────────────────────────────────────────────────
 // Devuelve pedidos SHOPIFY pendientes de confirmar cuya última actividad
 // (created_at si nunca recordamos, last_reminder_at si ya recordamos) fue

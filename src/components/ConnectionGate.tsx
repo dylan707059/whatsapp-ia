@@ -31,8 +31,35 @@ export default function ConnectionGate() {
   const [showSettings, setShowSettings]   = useState<boolean>(false);
   const [showAccounts, setShowAccounts]   = useState<boolean>(false);
   const [showPedidos, setShowPedidos]     = useState<boolean>(false);
+  const [automationPaused, setAutomationPaused] = useState<boolean>(false);
 
   const router = useRouter();
+
+  // Poll del estado de automatización para mostrar banner si está pausado.
+  useEffect(() => {
+    if (appStatus !== "connected") return;
+    const load = () =>
+      fetch("/api/automation")
+        .then((r) => r.json() as Promise<{ paused: boolean }>)
+        .then((d) => setAutomationPaused(Boolean(d.paused)))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [appStatus]);
+
+  async function activateAutomation() {
+    setAutomationPaused(false);
+    try {
+      await fetch("/api/automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: false })
+      });
+    } catch {
+      setAutomationPaused(true);
+    }
+  }
 
   async function handleLogout() {
     if (!confirm("¿Cerrar sesión?")) return;
@@ -344,16 +371,53 @@ export default function ConnectionGate() {
         onOrderAction={handleOrderAction}
       />
 
-      <main style={{ background: "var(--bg)", overflow: "hidden" }}>
-        {selectedConversation ? (
-          <ConversationPanel
-            conversation={selectedConversation}
-            onModeChange={handleModeChange}
-            onDelete={handleDelete}
-          />
-        ) : (
-          <EmptyState />
+      <main style={{ background: "var(--bg)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {automationPaused && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 16px",
+              background: "rgba(239,68,68,0.12)",
+              borderBottom: "1px solid rgba(239,68,68,0.4)",
+              color: "#ef4444",
+              fontSize: 13,
+              flexShrink: 0
+            }}
+          >
+            <span style={{ fontSize: 16 }}>⏸</span>
+            <span style={{ flex: 1, fontWeight: 500 }}>
+              Automatización EN PAUSA — los pedidos nuevos se registran pero el bot
+              NO envía confirmaciones ni recordatorios.
+            </span>
+            <button
+              onClick={activateAutomation}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 6,
+                background: "#22c55e",
+                color: "#fff",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0
+              }}
+            >
+              🤖 Activar bot
+            </button>
+          </div>
         )}
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          {selectedConversation ? (
+            <ConversationPanel
+              conversation={selectedConversation}
+              onModeChange={handleModeChange}
+              onDelete={handleDelete}
+            />
+          ) : (
+            <EmptyState />
+          )}
+        </div>
       </main>
 
       {notifPerm === "default" && (

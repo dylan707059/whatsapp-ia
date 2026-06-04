@@ -242,18 +242,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // envío real. El outbox respeta scheduled_at — solo dispara cuando llega
   // el momento, o cuando el handler entrante lo adelanta.
   // En pausa: el pedido queda registrado pero NO se envía confirmación.
-  if (!paused) {
+  if (paused) {
+    console.warn(
+      `[shopify] ⏸ Pedido ${parsed.orderNumber} REGISTRADO pero la automatización ` +
+      `está EN PAUSA — NO se envió confirmación. Activá el bot (botón 🤖) para que ` +
+      `los próximos pedidos se confirmen automáticamente. conv #${conv.id} order #${orderId}`
+    );
+  } else {
     const confMsgId = insertMessage(conv.id, "assistant", message);
-    // Confirmación = una sola oportunidad: si no se envía dentro de la ventana
-    // (5 min tras su hora), se descarta y se avisa al dueño (notify_owner).
-    enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId, scheduledAt + 300, true);
+    // Confirmación con ventana de gracia amplia: si el bot tiene un hipo o se
+    // reconecta, igual sale (no la descartamos a los 5 min). Configurable.
+    const graceSec = Number(process.env.SHOPIFY_CONFIRMATION_GRACE_SECONDS ?? 1800); // 30 min
+    enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId, scheduledAt + graceSec, true);
+    console.log(
+      `[shopify] ✅ Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +
+      `confirmación programada para ${new Date(scheduledAt * 1000).toISOString()} ` +
+      `(delay ${delaySec}s; se adelanta si cliente escribe; ventana de gracia ${graceSec}s)`
+    );
   }
-
-  console.log(
-    `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +
-    `mensaje programado para ${new Date(scheduledAt * 1000).toISOString()} ` +
-    `(delay ${delaySec}s; se adelanta si cliente escribe primero)`
-  );
 
   return NextResponse.json({
     ok: true,

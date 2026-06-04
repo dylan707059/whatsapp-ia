@@ -10,7 +10,10 @@ import pino from "pino";
 import qrcodeTerminal from "qrcode-terminal";
 import path from "node:path";
 import fs from "node:fs";
-import { setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused } from "../db";
+import {
+  setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused,
+  getConversationByPhone, archiveConversation, unarchiveConversation
+} from "../db";
 import { setupMessageHandler } from "./handler";
 import { registerContact } from "./contact-store";
 import { getOwnerNotifyPhones } from "../owner-notifier";
@@ -36,6 +39,29 @@ const starting        = new Set<number>();
 
 function authDirFor(accountId: number): string {
   return path.join(AUTH_DIR, String(accountId));
+}
+
+// Sincroniza el estado "archivado" del teléfono hacia el panel.
+// Cuando archivas/desarchivas un chat en el WhatsApp del celular, WhatsApp lo
+// propaga al dispositivo vinculado (este bot) como un cambio de chat, y aquí
+// lo reflejamos en la base de datos del panel.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function syncArchiveFromChat(chat: any, ownerPhone: string) {
+  const jid: string | undefined = chat?.id;
+  if (!jid) return;
+  const archived = chat.archived;
+  if (typeof archived !== "boolean") return;
+
+  const conv = getConversationByPhone(jid, ownerPhone);
+  if (!conv) return;
+
+  if (archived && conv.archived_at == null) {
+    archiveConversation(conv.id);
+    console.log(`[bot] Chat ${jid} archivado desde el teléfono → panel`);
+  } else if (!archived && conv.archived_at != null) {
+    unarchiveConversation(conv.id);
+    console.log(`[bot] Chat ${jid} desarchivado desde el teléfono → panel`);
+  }
 }
 
 function scheduleReconnect(accountId: number, code?: number) {
@@ -109,6 +135,17 @@ async function _start(accountId: number): Promise<void> {
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // Sincronización de archivado teléfono → panel.
+  sock.ev.on("chats.update", (updates) => {
+    const phone = (sock.user?.id ?? "").split(":")[0];
+    for (const u of updates) { try { syncArchiveFromChat(u, phone); } catch {} }
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sock.ev.on("messaging-history.set", (arg: any) => {
+    const phone = (sock.user?.id ?? "").split(":")[0];
+    for (const c of (arg?.chats ?? [])) { try { syncArchiveFromChat(c, phone); } catch {} }
+  });
 
   sock.ev.on("contacts.upsert", (contacts) => {
     for (const c of contacts) registerContact(c.id, (c as { lid?: string }).lid);

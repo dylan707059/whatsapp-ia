@@ -148,6 +148,23 @@ export default function ConnectionGate() {
     }
   }
 
+  // Cambiar estado del pedido activo de una conversación (desde el clic derecho).
+  async function handleOrderAction(conversationId: number, action: "dispatch" | "cancel") {
+    try {
+      const res = await fetch(`/api/orders/${conversationId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({})) as { error?: string };
+        alert(error || "No se pudo cambiar el estado (¿tiene pedido activo?)");
+      }
+    } catch (err) {
+      console.error("Error cambiando estado:", err);
+    }
+  }
+
   // Filtros aplicados sobre las convs cargadas
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -277,6 +294,9 @@ export default function ConnectionGate() {
         viewLabel={view === "archived" ? "Archivados" : "Mensajes"}
         totalCount={conversations.length}
         loading={!convsLoaded}
+        onPinToggle={handlePinToggle}
+        onArchiveToggle={handleArchiveToggle}
+        onOrderAction={handleOrderAction}
       />
 
       <main style={{ background: "var(--bg)", overflow: "hidden" }}>
@@ -285,8 +305,6 @@ export default function ConnectionGate() {
             conversation={selectedConversation}
             onModeChange={handleModeChange}
             onDelete={handleDelete}
-            onArchiveToggle={handleArchiveToggle}
-            onPinToggle={handlePinToggle}
           />
         ) : (
           <EmptyState />

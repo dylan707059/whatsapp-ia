@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import type { ConversationWithPreview } from "@/lib/types";
 import { jidToDisplay } from "@/lib/types";
 import { ChatRowSkeleton } from "./Skeleton";
@@ -14,7 +14,12 @@ interface Props {
   viewLabel: string;
   totalCount: number;
   loading?: boolean;
+  onPinToggle?: (id: number, pinned: boolean) => void;
+  onArchiveToggle?: (id: number, archived: boolean) => void;
+  onOrderAction?: (conversationId: number, action: "dispatch" | "cancel") => void;
 }
+
+interface MenuState { x: number; y: number; conv: ConversationWithPreview; }
 
 function relativeTime(unixSeconds: number | null): string {
   if (!unixSeconds) return "";
@@ -66,6 +71,26 @@ function avatarColors(seed: string): [string, string] {
 export default function ConversationList(props: Props) {
   const pinned = props.conversations.filter((c) => c.pinned_at);
   const recent = props.conversations.filter((c) => !c.pinned_at);
+
+  const [menu, setMenu] = useState<MenuState | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+
+  function openMenu(e: React.MouseEvent, conv: ConversationWithPreview) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, conv });
+  }
 
   return (
     <aside
@@ -168,6 +193,7 @@ export default function ConversationList(props: Props) {
                 conv={c}
                 active={props.selectedId === c.id}
                 onClick={() => props.onSelect(c.id)}
+                onContextMenu={openMenu}
               />
             ))}
           </>
@@ -182,12 +208,87 @@ export default function ConversationList(props: Props) {
                 conv={c}
                 active={props.selectedId === c.id}
                 onClick={() => props.onSelect(c.id)}
+                onContextMenu={openMenu}
               />
             ))}
           </>
         )}
       </div>
+
+      {/* Menú de clic derecho (estilo WhatsApp Web) */}
+      {menu && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 220),
+            top: menu.y,
+            zIndex: 1000,
+            minWidth: 200,
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            padding: 6,
+            display: "flex",
+            flexDirection: "column"
+          }}
+        >
+          {props.onPinToggle && (
+            <MenuItem
+              label={menu.conv.pinned_at ? "Desanclar" : "Anclar"}
+              icon="📌"
+              onClick={() => { props.onPinToggle!(menu.conv.id, !!menu.conv.pinned_at); setMenu(null); }}
+            />
+          )}
+          {props.onArchiveToggle && (
+            <MenuItem
+              label={menu.conv.archived_at ? "Desarchivar" : "Archivar"}
+              icon={menu.conv.archived_at ? "↩️" : "📁"}
+              onClick={() => { props.onArchiveToggle!(menu.conv.id, !!menu.conv.archived_at); setMenu(null); }}
+            />
+          )}
+          {props.onOrderAction && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              <MenuItem
+                label="Marcar despachado"
+                icon="🚚"
+                onClick={() => { props.onOrderAction!(menu.conv.id, "dispatch"); setMenu(null); }}
+              />
+              <MenuItem
+                label="Cancelar pedido"
+                icon="✖"
+                danger
+                onClick={() => { props.onOrderAction!(menu.conv.id, "cancel"); setMenu(null); }}
+              />
+            </>
+          )}
+        </div>
+      )}
     </aside>
+  );
+}
+
+function MenuItem({
+  label, icon, onClick, danger
+}: { label: string; icon: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "8px 10px", borderRadius: 6,
+        fontSize: 13, textAlign: "left", width: "100%",
+        color: danger ? "var(--danger)" : "var(--text)",
+        background: "transparent"
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ width: 16 }}>{icon}</span>
+      {label}
+    </button>
   );
 }
 
@@ -212,6 +313,7 @@ interface ChatRowProps {
   conv: ConversationWithPreview;
   active: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent, conv: ConversationWithPreview) => void;
 }
 
 const ChatRow = memo(ChatRowInner, (prev, next) => {
@@ -237,7 +339,7 @@ const ChatRow = memo(ChatRowInner, (prev, next) => {
 });
 
 function ChatRowInner({
-  conv, active, onClick
+  conv, active, onClick, onContextMenu
 }: ChatRowProps) {
   const name = displayName(conv);
   const [g1, g2] = avatarColors(name);
@@ -246,6 +348,7 @@ function ChatRowInner({
   return (
     <button
       onClick={onClick}
+      onContextMenu={(e) => onContextMenu(e, conv)}
       style={{
         width: "100%",
         padding: "9px 14px",

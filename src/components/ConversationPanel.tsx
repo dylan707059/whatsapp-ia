@@ -13,8 +13,6 @@ interface Props {
   conversation: Conversation;
   onModeChange: (id: number, mode: "AI" | "HUMAN") => void;
   onDelete: (id: number) => void;
-  onArchiveToggle?: (id: number, archived: boolean) => void;
-  onPinToggle?: (id: number, pinned: boolean) => void;
 }
 
 const AVATAR_GRADIENTS = [
@@ -35,10 +33,9 @@ function initialsOf(name: string): string {
 }
 
 export default function ConversationPanel({
-  conversation, onModeChange, onDelete, onArchiveToggle, onPinToggle
+  conversation, onModeChange, onDelete
 }: Props) {
-  const isArchived = conversation.archived_at != null;
-  const isPinned   = conversation.pinned_at != null;
+  const isPinned = conversation.pinned_at != null;
 
   const [messages, setMessages]   = useState<Message[]>([]);
   const [mode, setMode]           = useState<"AI" | "HUMAN">(conversation.mode);
@@ -190,18 +187,9 @@ export default function ConversationPanel({
           </div>
         </button>
 
-        {/* Action buttons */}
+        {/* Action buttons (anclar/archivar van en el clic derecho de la lista) */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <ModeChip mode={mode} onClick={toggleMode} />
-          {onPinToggle && (
-            <IconBtn
-              active={isPinned}
-              onClick={() => onPinToggle(conversation.id, isPinned)}
-              title={isPinned ? "Desfijar" : "Fijar arriba"}
-            >
-              📌
-            </IconBtn>
-          )}
           <div style={{ position: "relative" }}>
             <IconBtn
               active={labelsOpen}
@@ -217,14 +205,6 @@ export default function ConversationPanel({
               />
             )}
           </div>
-          {onArchiveToggle && (
-            <IconBtn
-              onClick={() => onArchiveToggle(conversation.id, isArchived)}
-              title={isArchived ? "Desarchivar" : "Archivar"}
-            >
-              {isArchived ? "↩️" : "📁"}
-            </IconBtn>
-          )}
           <IconBtn onClick={handleDelete} title="Borrar" danger>
             🗑️
           </IconBtn>
@@ -235,10 +215,6 @@ export default function ConversationPanel({
       {infoOpen && (
         <ConversationInfo
           conversation={conversation}
-          isPinned={isPinned}
-          isArchived={isArchived}
-          onPinToggle={onPinToggle ? () => onPinToggle(conversation.id, isPinned) : undefined}
-          onArchiveToggle={onArchiveToggle ? () => onArchiveToggle(conversation.id, isArchived) : undefined}
           onClose={() => setInfoOpen(false)}
         />
       )}

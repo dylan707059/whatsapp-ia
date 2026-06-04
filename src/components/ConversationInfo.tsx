@@ -31,50 +31,28 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 
 interface Props {
   conversation: Conversation;
-  isPinned: boolean;
-  isArchived: boolean;
-  onPinToggle?: () => void;
-  onArchiveToggle?: () => void;
   onClose: () => void;
 }
 
-export default function ConversationInfo({
-  conversation, isPinned, isArchived, onPinToggle, onArchiveToggle, onClose
-}: Props) {
+export default function ConversationInfo({ conversation, onClose }: Props) {
   const [order, setOrder] = useState<OrderInfo | null>(null);
-  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [blocked, setBlocked] = useState<boolean>(conversation.blocked_at != null);
 
-  async function load() {
-    try {
-      const r = await fetch(`/api/orders/${conversation.id}`);
-      if (r.ok) {
-        const d = await r.json();
-        setOrder(d.order ?? null);
+  useEffect(() => {
+    setBlocked(conversation.blocked_at != null);
+    (async () => {
+      try {
+        const r = await fetch(`/api/orders/${conversation.id}`);
+        if (r.ok) {
+          const d = await r.json();
+          setOrder(d.order ?? null);
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-  }
-
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [conversation.id]);
-
-  async function changeStatus(action: "dispatch" | "cancel") {
-    if (!order) return;
-    setBusy(true);
-    try {
-      await fetch("/api/orders-board", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: order.id, action })
-      });
-      await load();
-    } catch {
-      // ignore
-    } finally {
-      setBusy(false);
-    }
-  }
+    })();
+  }, [conversation.id, conversation.blocked_at]);
 
   async function copyData() {
     if (!order) return;
@@ -96,9 +74,18 @@ export default function ConversationInfo({
     }
   }
 
+  async function toggleBlock() {
+    const next = !blocked;
+    if (next && !confirm("¿Bloquear a este cliente? El bot dejará de responderle.")) return;
+    setBlocked(next);
+    try {
+      await fetch(`/api/conversations/${conversation.id}/block`, { method: "POST" });
+    } catch {
+      setBlocked(!next); // revertir si falla
+    }
+  }
+
   const st = order ? (STATUS_LABEL[order.status] ?? { label: order.status, color: "var(--text-muted)" }) : null;
-  const isConfirmed = order && (order.status === "CONFIRMED" || order.status === "OWNER_NOTIFIED");
-  const isCancellable = order && order.status !== "CANCELLED" && order.status !== "DISPATCHED";
 
   return (
     <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elev-2)", padding: "14px 20px" }}>
@@ -107,7 +94,6 @@ export default function ConversationInfo({
         <button onClick={onClose} style={{ color: "var(--text-dim)", fontSize: 13 }} title="Cerrar">✕</button>
       </div>
 
-      {/* Datos */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, color: "var(--text-muted)" }}>
         <Row k="Nombre" v={order?.full_name || conversation.name || "—"} />
         <Row k="Teléfono" v={order?.phone || jidToDisplay(conversation.phone)} />
@@ -133,27 +119,16 @@ export default function ConversationInfo({
         )}
       </div>
 
-      {/* Acciones */}
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-        {onPinToggle && (
-          <button onClick={onPinToggle} style={actionBtn}>{isPinned ? "📌 Desanclar" : "📌 Anclar"}</button>
-        )}
-        {onArchiveToggle && (
-          <button onClick={onArchiveToggle} style={actionBtn}>{isArchived ? "↩️ Desarchivar" : "📁 Archivar"}</button>
-        )}
         {order && (
           <button onClick={copyData} style={actionBtn}>{copied ? "✓ Copiado" : "📋 Copiar para Dropi"}</button>
         )}
-        {isConfirmed && (
-          <button onClick={() => changeStatus("dispatch")} disabled={busy} style={{ ...actionBtn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }}>
-            {busy ? "…" : "🚚 Marcar despachado"}
-          </button>
-        )}
-        {isCancellable && (
-          <button onClick={() => changeStatus("cancel")} disabled={busy} style={{ ...actionBtn, color: "#ef4444", borderColor: "#ef4444" }}>
-            Cancelar pedido
-          </button>
-        )}
+        <button
+          onClick={toggleBlock}
+          style={{ ...actionBtn, color: blocked ? "#34d399" : "#ef4444", borderColor: blocked ? "#34d399" : "#ef4444" }}
+        >
+          {blocked ? "✓ Desbloquear" : "🚫 Bloquear cliente"}
+        </button>
       </div>
     </div>
   );

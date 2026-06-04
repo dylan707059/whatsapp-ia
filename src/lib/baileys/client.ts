@@ -9,6 +9,7 @@ import type { WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcodeTerminal from "qrcode-terminal";
 import path from "node:path";
+import fs from "node:fs";
 import {
   setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused,
   getConversationByPhone, archiveConversation, unarchiveConversation, discardPendingOutboxForOwner
@@ -98,6 +99,10 @@ export async function start(accountId: number): Promise<void> {
 
 async function _start(accountId: number): Promise<void> {
   const authDir = authDirFor(accountId);
+  // ¿Vínculo NUEVO? (no había credenciales antes de conectar = se escaneó un QR
+  // nuevo). Solo en ese caso pausamos al conectar. En reconexiones normales
+  // (Baileys reconecta solo) NO tocamos el estado de la automatización.
+  const isFreshLink = !fs.existsSync(path.join(authDir, "creds.json"));
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   let version: [number, number, number] | undefined;
@@ -183,12 +188,16 @@ async function _start(accountId: number): Promise<void> {
       setAccountConnection(accountId, { status: "connected", qr_string: null, phone });
       setAccountOwnerPhone(accountId, phone);
 
-      // ⛔ Al (re)conectar: PAUSAR la automatización y DESCARTAR la cola
-      // pendiente. Así el bot NO manda nada viejo al conectar. El dueño la
-      // activa manualmente con el botón 🤖 cuando esté listo.
-      setAccountAutomationPaused(accountId, true);
-      const discarded = discardPendingOutboxForOwner(phone);
-      console.log(`[bot] (acc ${accountId}) Conectado — automatización EN PAUSA; ${discarded} mensaje(s) en cola descartados.`);
+      // Solo en VÍNCULO NUEVO (QR recién escaneado): pausar y descartar la cola,
+      // para no mandar nada viejo. En reconexiones normales NO se toca el estado
+      // (si el dueño activó la automatización, se queda activa).
+      if (isFreshLink) {
+        setAccountAutomationPaused(accountId, true);
+        const discarded = discardPendingOutboxForOwner(phone);
+        console.log(`[bot] (acc ${accountId}) Vínculo nuevo — automatización EN PAUSA; ${discarded} mensaje(s) en cola descartados.`);
+      } else {
+        console.log(`[bot] (acc ${accountId}) Reconectado — se mantiene el estado de automatización.`);
+      }
 
       // Pre-registrar LIDs de owners para resolver @lid JIDs
       for (const ownerPhone of getOwnerNotifyPhones(phone)) {

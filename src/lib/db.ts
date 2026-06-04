@@ -236,6 +236,7 @@ db.exec(`
     business_name    TEXT,
     owner_phone      TEXT,
     automation_paused INTEGER NOT NULL DEFAULT 0,
+    automation_resumed_at INTEGER,
     is_admin         INTEGER NOT NULL DEFAULT 0,
     created_at       INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -351,6 +352,8 @@ db.exec(`
       db.exec("ALTER TABLE accounts ADD COLUMN automation_paused INTEGER NOT NULL DEFAULT 0");
     if (!cols.includes("is_admin"))
       db.exec("ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+    if (!cols.includes("automation_resumed_at"))
+      db.exec("ALTER TABLE accounts ADD COLUMN automation_resumed_at INTEGER");
     // Garantizar al menos un admin: la cuenta más antigua si no hay ninguno.
     const adminCount = db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE is_admin = 1").get() as { n: number };
     if (adminCount.n === 0) {
@@ -887,6 +890,7 @@ export interface Account {
   business_name: string | null;
   owner_phone: string | null;
   automation_paused: number;
+  automation_resumed_at: number | null;
   is_admin: number;
   created_at: number;
 }
@@ -1138,15 +1142,22 @@ export function getAccountByOwnerPhone(phone: string): Account | undefined {
 // Cuando está pausada, el bot NO hace nada automático (ni IA, ni confirmaciones,
 // ni recordatorios, ni avisos). Los mensajes entrantes se guardan igual y el
 // owner puede seguir escribiendo manualmente.
-const stmtSetAutoPaused = db.prepare<[number, number]>(
-  "UPDATE accounts SET automation_paused = ? WHERE id = ?"
+const stmtPauseAuto = db.prepare<[number]>(
+  "UPDATE accounts SET automation_paused = 1 WHERE id = ?"
+);
+const stmtResumeAuto = db.prepare<[number]>(
+  "UPDATE accounts SET automation_paused = 0, automation_resumed_at = unixepoch() WHERE id = ?"
 );
 const stmtIsAutoPaused = db.prepare<[number], { automation_paused: number }>(
   "SELECT automation_paused FROM accounts WHERE id = ?"
 );
 
 export function setAccountAutomationPaused(accountId: number, paused: boolean): void {
-  stmtSetAutoPaused.run(paused ? 1 : 0, accountId);
+  // Al ACTIVAR (despausar) marcamos automation_resumed_at = ahora. A partir de
+  // ese momento el bot solo atiende pedidos NUEVOS — los viejos pendientes no
+  // reciben recordatorios ni nada.
+  if (paused) stmtPauseAuto.run(accountId);
+  else stmtResumeAuto.run(accountId);
 }
 export function isAccountAutomationPaused(accountId: number): boolean {
   return (stmtIsAutoPaused.get(accountId)?.automation_paused ?? 0) === 1;

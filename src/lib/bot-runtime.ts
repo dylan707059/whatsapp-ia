@@ -5,7 +5,7 @@ import {
   getPendingOutbox, claimOutboxItem, unclaimOutboxItem, enqueueOutbox, insertMessage,
   setMessageWaId, getPendingRevokes, markRevokeDone,
   listAllAccounts, getAccountConnection, getConversationById,
-  isAccountAutomationPaused, getAppState, setAppState
+  isAccountAutomationPaused, getAppState, setAppState, getAccountById
 } from "./db";
 import {
   getOrdersNeedingReminder,
@@ -236,8 +236,11 @@ export function startBotRuntime(): void {
       if (isAccountAutomationPaused(h.accountId)) continue;
       const currentOwner = conn.phone;
 
+      // Marca de agua: solo pedidos creados DESPUÉS de la última activación.
+      const resumedAt = getAccountById(h.accountId)?.automation_resumed_at ?? 0;
+
       const due = getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)
-        .filter((o) => nowSec - o.created_at <= REMINDER_MAX_AGE);
+        .filter((o) => o.created_at >= resumedAt && nowSec - o.created_at <= REMINDER_MAX_AGE);
 
       // Tras una caída: avisar al dueño en vez de enviar masivo.
       if (recovering) {
@@ -273,6 +276,7 @@ export function startBotRuntime(): void {
       }
 
       for (const order of getOrdersToAutoCancel(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)) {
+        if (order.created_at < resumedAt) continue; // anterior a la activación
         if (nowSec - order.created_at > REMINDER_MAX_AGE) continue;
         try {
           const orderNumberText = order.id ? `#${order.id}` : "";

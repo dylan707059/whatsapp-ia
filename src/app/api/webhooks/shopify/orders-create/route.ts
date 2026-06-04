@@ -65,11 +65,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ─── 4. Resolver la cuenta dueña y su número conectado ─────────────────────
   const account = settings ? getAccountById(settings.account_id) : undefined;
 
-  // Interruptor de automatización: si la cuenta lo apagó, no procesamos nada.
-  if (account && isAccountAutomationPaused(account.id)) {
-    console.log(`[shopify] Automatización pausada para cuenta ${account.id} — pedido ${parsed.orderNumber} ignorado`);
-    return NextResponse.json({ ok: true, skipped: "automation_paused" });
-  }
+  // Si la automatización está en pausa, IGUAL registramos el pedido (para que
+  // se vea en el panel de Pedidos) pero NO enviamos ningún mensaje al cliente.
+  const paused = account ? isAccountAutomationPaused(account.id) : false;
 
   const ownerPhone = account?.owner_phone ?? "";
   const conn = account ? getAccountConnection(account.id) : undefined;
@@ -120,8 +118,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const delaySec = settings?.confirmation_delay_seconds ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
-    const rejMsgId = insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, rejMsgId, scheduledAt + 300, true);
+    if (!paused) {
+      const rejMsgId = insertMessage(conv.id, "assistant", rejectionText);
+      enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, rejMsgId, scheduledAt + 300, true);
+    }
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por zona no cubierta (${zoneLabel}) — ` +
@@ -163,8 +163,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const delaySec = settings?.confirmation_delay_seconds ?? Number(process.env.SHOPIFY_CONFIRMATION_DELAY_SECONDS ?? 180);
     const scheduledAt = Math.floor(Date.now() / 1000) + (Number.isFinite(delaySec) ? delaySec : 180);
 
-    const ofcMsgId = insertMessage(conv.id, "assistant", rejectionText);
-    enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, ofcMsgId, scheduledAt + 300, true);
+    if (!paused) {
+      const ofcMsgId = insertMessage(conv.id, "assistant", rejectionText);
+      enqueueOutbox(conv.id, conv.phone, rejectionText, scheduledAt, ofcMsgId, scheduledAt + 300, true);
+    }
 
     console.log(
       `[shopify] Pedido ${parsed.orderNumber} RECHAZADO por dirección de oficina ` +
@@ -239,10 +241,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // encolar (para que aparezca en el dashboard) y dejamos outbox como cola de
   // envío real. El outbox respeta scheduled_at — solo dispara cuando llega
   // el momento, o cuando el handler entrante lo adelanta.
-  const confMsgId = insertMessage(conv.id, "assistant", message);
-  // Confirmación = una sola oportunidad: si no se envía dentro de la ventana
-  // (5 min tras su hora), se descarta y se avisa al dueño (notify_owner).
-  enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId, scheduledAt + 300, true);
+  // En pausa: el pedido queda registrado pero NO se envía confirmación.
+  if (!paused) {
+    const confMsgId = insertMessage(conv.id, "assistant", message);
+    // Confirmación = una sola oportunidad: si no se envía dentro de la ventana
+    // (5 min tras su hora), se descarta y se avisa al dueño (notify_owner).
+    enqueueOutbox(conv.id, conv.phone, message, scheduledAt, confMsgId, scheduledAt + 300, true);
+  }
 
   console.log(
     `[shopify] Pedido ${parsed.orderNumber} → conv #${conv.id} (${normalizePhone(parsed.rawPhone)}) — ` +

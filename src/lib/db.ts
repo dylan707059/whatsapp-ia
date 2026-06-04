@@ -579,6 +579,22 @@ export function markOutboxSent(id: number): void {
   stmtMarkSent.run(id);
 }
 
+const stmtDiscardPendingOutbox = db.prepare<[string], { changes: number }>(`
+  UPDATE outbox SET sent = 1
+  WHERE sent = 0 AND conversation_id IN (
+    SELECT id FROM conversations WHERE owner_phone = ?
+  )
+`);
+/**
+ * Descarta (marca como enviados sin enviar) todos los mensajes pendientes de
+ * una cuenta. Se usa al (re)conectar para NO disparar la cola vieja.
+ * @returns cantidad de mensajes descartados.
+ */
+export function discardPendingOutboxForOwner(ownerPhone: string): number {
+  if (!ownerPhone) return 0;
+  return stmtDiscardPendingOutbox.run(ownerPhone).changes;
+}
+
 /**
  * Intenta claimear un item de outbox para envío atómico (at-most-once).
  * Devuelve true si el caller debe enviar el mensaje; false si otro proceso

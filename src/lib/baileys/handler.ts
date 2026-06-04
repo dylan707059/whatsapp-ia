@@ -189,7 +189,11 @@ async function processMessage(
     return;
   }
 
-  insertMessage(convo.id, "user", text!);
+  // Sin media ⇒ mensaje de texto. (El guard de arriba ya garantiza que hay
+  // texto; este chequeo además estrecha el tipo de `text` para el resto.)
+  if (!text?.trim()) return;
+
+  insertMessage(convo.id, "user", text);
   incrementUnread(convo.id);
 
   // ─── Interruptor de automatización (botón de pánico) ──────────────────────

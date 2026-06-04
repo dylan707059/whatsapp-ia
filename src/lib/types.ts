@@ -123,3 +123,36 @@ export interface OrderData {
 export function jidToDisplay(jid: string): string {
   return jid.split("@")[0];
 }
+
+/**
+ * Formatea un número en dígitos a una forma legible.
+ * Colombia (57 + 10 dígitos): "573137941545" → "+57 313 794 1545".
+ * 10 dígitos: "3137941545" → "313 794 1545".
+ */
+export function formatPhoneNumber(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "");
+  if (d.startsWith("57") && d.length === 12) {
+    const l = d.slice(2);
+    return `+57 ${l.slice(0, 3)} ${l.slice(3, 6)} ${l.slice(6)}`;
+  }
+  if (d.length === 10) {
+    return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  }
+  return d;
+}
+
+/**
+ * Título a mostrar para una conversación.
+ * - Teléfono real (@s.whatsapp.net): número formateado.
+ * - ID de privacidad (@lid): no hay número usable → muestra el nombre,
+ *   o un identificador corto si no hay nombre.
+ */
+export function chatDisplayTitle(jid: string, name?: string | null): string {
+  if (jid.endsWith("@s.whatsapp.net")) {
+    return formatPhoneNumber(jid.split("@")[0]);
+  }
+  const n = name?.trim();
+  if (n) return n;
+  const id = jid.split("@")[0];
+  return id.length > 6 ? `Contacto …${id.slice(-4)}` : id;
+}

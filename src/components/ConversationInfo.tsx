@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import type { Conversation } from "@/lib/types";
-import { jidToDisplay } from "@/lib/types";
+import { jidToDisplay, formatPhoneNumber } from "@/lib/types";
 
 interface OrderInfo {
   id: number;
@@ -96,7 +96,7 @@ export default function ConversationInfo({ conversation, onClose }: Props) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, color: "var(--text-muted)" }}>
         <Row k="Nombre" v={order?.full_name || conversation.name || "—"} />
-        <Row k="Teléfono" v={order?.phone || jidToDisplay(conversation.phone)} />
+        <Row k="Teléfono" v={formatPhoneNumber(order?.phone || jidToDisplay(conversation.phone))} />
         {order && (
           <>
             <Row k="Producto" v={[order.product, order.color, order.size].filter(Boolean).join(" · ") || "—"} />

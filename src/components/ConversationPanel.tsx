@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Conversation, Message } from "@/lib/types";
-import { jidToDisplay } from "@/lib/types";
+import { jidToDisplay, chatDisplayTitle, formatPhoneNumber } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import OrderSummary from "./OrderSummary";
 import LabelsPopover from "./LabelsPopover";
@@ -130,7 +130,11 @@ export default function ConversationPanel({
     onDelete(conversation.id);
   }
 
-  const name = conversation.name?.trim() || jidToDisplay(conversation.phone);
+  const name = conversation.name?.trim() || chatDisplayTitle(conversation.phone, conversation.name);
+  const isRealPhone = conversation.phone.endsWith("@s.whatsapp.net");
+  const phoneLine = isRealPhone
+    ? formatPhoneNumber(jidToDisplay(conversation.phone))
+    : `ID privacidad …${jidToDisplay(conversation.phone).slice(-4)}`;
   const [g1, g2] = avatarColors(name);
   const initials = initialsOf(name);
 
@@ -183,7 +187,7 @@ export default function ConversationPanel({
             className="font-mono"
             style={{ fontSize: 11, color: "var(--text-muted)" }}
           >
-            {jidToDisplay(conversation.phone)}
+            {phoneLine}
           </div>
         </button>
 

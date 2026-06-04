@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useState } from "react";
 import type { ConversationWithPreview } from "@/lib/types";
-import { jidToDisplay } from "@/lib/types";
+import { jidToDisplay, chatDisplayTitle } from "@/lib/types";
 import { ChatRowSkeleton } from "./Skeleton";
 
 interface Props {
@@ -36,17 +36,24 @@ function relativeTime(unixSeconds: number | null): string {
   return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
-// En la lista mostramos el NÚMERO (no el nombre). El nombre se ve en la
-// cabecera del chat y en el panel de información.
+// Título de la fila: número formateado (teléfono real) o nombre (ID privacidad).
 function displayName(c: ConversationWithPreview): string {
-  return jidToDisplay(c.phone);
+  return chatDisplayTitle(c.phone, c.name);
 }
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+// Avatar: iniciales del nombre si lo hay; si no, los últimos 2 dígitos del
+// número (más distintivos que el indicativo "57").
+function avatarSeedAndInitials(c: ConversationWithPreview): { seed: string; initials: string } {
+  const name = c.name?.trim();
+  if (name && /[a-zA-ZÀ-ÿ]/.test(name)) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    const initials = parts.length === 1
+      ? parts[0].slice(0, 2).toUpperCase()
+      : (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return { seed: name, initials };
+  }
+  const digits = jidToDisplay(c.phone).replace(/\D/g, "");
+  return { seed: digits || c.phone, initials: digits.slice(-2) || "?" };
 }
 
 const AVATAR_GRADIENTS = [
@@ -342,8 +349,8 @@ function ChatRowInner({
   conv, active, onClick, onContextMenu
 }: ChatRowProps) {
   const name = displayName(conv);
-  const [g1, g2] = avatarColors(name);
-  const initials = initialsOf(name);
+  const { seed, initials } = avatarSeedAndInitials(conv);
+  const [g1, g2] = avatarColors(seed);
 
   return (
     <button

@@ -9,7 +9,8 @@ import type { WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcodeTerminal from "qrcode-terminal";
 import path from "node:path";
-import { setAccountConnection, getAccountConnection, setAccountOwnerPhone } from "../db";
+import fs from "node:fs";
+import { setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused } from "../db";
 import { setupMessageHandler } from "./handler";
 import { registerContact } from "./contact-store";
 import { getOwnerNotifyPhones } from "../owner-notifier";
@@ -72,6 +73,9 @@ export async function start(accountId: number): Promise<void> {
 
 async function _start(accountId: number): Promise<void> {
   const authDir = authDirFor(accountId);
+  // ¿Es un vínculo nuevo (sin credenciales previas)? Si lo es, al conectar
+  // arrancamos con la automatización en pausa por seguridad.
+  const isFreshLink = !fs.existsSync(path.join(authDir, "creds.json"));
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   let version: [number, number, number] | undefined;
@@ -145,6 +149,13 @@ async function _start(accountId: number): Promise<void> {
       console.log(`[bot] (acc ${accountId}) Conectado como ${phone}`);
       setAccountConnection(accountId, { status: "connected", qr_string: null, phone });
       setAccountOwnerPhone(accountId, phone);
+
+      // Vínculo nuevo → arrancar con la automatización en pausa (seguridad):
+      // el owner la activa manualmente con el botón cuando esté listo.
+      if (isFreshLink) {
+        setAccountAutomationPaused(accountId, true);
+        console.log(`[bot] (acc ${accountId}) Nuevo vínculo — automatización EN PAUSA por seguridad`);
+      }
 
       // Pre-registrar LIDs de owners para resolver @lid JIDs
       for (const ownerPhone of getOwnerNotifyPhones(phone)) {

@@ -95,7 +95,7 @@ async function processMessage(
   }
 
   const senderPhone = resolvePhone(jid);
-  const ownerPhones = getOwnerNotifyPhones();
+  const ownerPhones = getOwnerNotifyPhones(ownerPhone);
   const isOwner     = ownerPhones.includes(senderPhone);
 
   if (jid.endsWith("@lid") && !isOwner) {
@@ -199,7 +199,7 @@ async function processMessage(
 
   // ─── Reclamo ──────────────────────────────────────────────────────────────
   if (isComplaintMessage(text)) {
-    await handleComplaint(sock, jid, convo.id, senderPhone, text);
+    await handleComplaint(sock, jid, convo.id, senderPhone, text, ownerPhone);
     return;
   }
 
@@ -355,7 +355,8 @@ async function handleComplaint(
   jid: string,
   conversationId: number,
   clientPhone: string,
-  text: string
+  text: string,
+  ownerPhone: string
 ): Promise<void> {
   console.log(`[bot] Reclamo detectado en conversación ${conversationId}`);
   setConversationMode(conversationId, "HUMAN");
@@ -365,7 +366,7 @@ async function handleComplaint(
   await botSend(sock, jid, reply);
 
   const alert  = buildComplaintAlert(conversationId, clientPhone, text);
-  const phones = getOwnerNotifyPhones();
+  const phones = getOwnerNotifyPhones(ownerPhone);
 
   for (const phone of phones) {
     try {

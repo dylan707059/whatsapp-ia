@@ -1,6 +1,6 @@
 import type { WASocket } from "@whiskeysockets/baileys";
 import type { OrderData } from "./types";
-import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getActiveAccountSettings } from "./db";
+import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getAccountByOwnerPhone, getAccountSettings } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
 import { enqueueOrderTask } from "./queue";
@@ -12,19 +12,25 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function getOwnerNotifyPhones(): string[] {
-  const fromDb = getActiveAccountSettings()?.owner_notify_phones?.trim();
-  const raw = fromDb || (process.env.OWNER_NOTIFY_PHONES ?? "");
+/**
+ * Teléfonos a notificar para la cuenta cuyo WhatsApp conectado es `ownerPhone`.
+ * Usa la config guardada de esa cuenta; cae a la variable de entorno global.
+ */
+export function getOwnerNotifyPhones(ownerPhone: string): string[] {
+  let raw = "";
+  if (ownerPhone) {
+    const acc = getAccountByOwnerPhone(ownerPhone);
+    if (acc) {
+      const s = getAccountSettings(acc.id);
+      if (s?.owner_notify_phones?.trim()) raw = s.owner_notify_phones.trim();
+    }
+  }
+  if (!raw) raw = process.env.OWNER_NOTIFY_PHONES ?? "";
   if (!raw.trim()) return [];
   return raw
     .split(",")
     .map((p) => p.trim().replace(/[\s\-+]/g, ""))
     .filter(Boolean);
-}
-
-export function isOwnerPhone(phone: string): boolean {
-  const normalized = phone.replace(/[\s\-+]/g, "");
-  return getOwnerNotifyPhones().includes(normalized);
 }
 
 // ─── Formato de mensajes ──────────────────────────────────────────────────────
@@ -110,10 +116,12 @@ export async function sendOwnerNotificationSequentially(
     return;
   }
 
-  const phones = getOwnerNotifyPhones();
+  // El número conectado de la cuenta dueña (para resolver SUS teléfonos de aviso).
+  const botOwnerPhone = (sock.user?.id ?? "").split(":")[0] ?? "";
+  const phones = getOwnerNotifyPhones(botOwnerPhone);
 
   if (phones.length === 0) {
-    console.warn("[bot] OWNER_NOTIFY_PHONES vacío — no se envía notificación interna");
+    console.warn("[bot] Sin teléfonos de aviso configurados — no se envía notificación interna");
     return;
   }
 
@@ -130,11 +138,6 @@ export async function sendOwnerNotificationSequentially(
 
   const summary = buildSummaryMessage(data, orderId);
   const copy    = buildCopyMessage(data, orderId);
-
-  // Inferir el owner_phone del bot a partir del socket — necesario para que la
-  // conversación del owner sea visible en el dashboard cuando este número está
-  // conectado.
-  const botOwnerPhone = (sock.user?.id ?? "").split(":")[0] ?? "";
 
   for (const phone of phones) {
     const jid = `${phone}@s.whatsapp.net`;

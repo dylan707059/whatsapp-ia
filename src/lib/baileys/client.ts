@@ -147,7 +147,7 @@ async function _start(accountId: number): Promise<void> {
       setAccountOwnerPhone(accountId, phone);
 
       // Pre-registrar LIDs de owners para resolver @lid JIDs
-      for (const ownerPhone of getOwnerNotifyPhones()) {
+      for (const ownerPhone of getOwnerNotifyPhones(phone)) {
         try {
           const results = await sock.onWhatsApp(ownerPhone);
           const info = results?.[0] as { jid: string; lid?: string; exists: boolean } | undefined;

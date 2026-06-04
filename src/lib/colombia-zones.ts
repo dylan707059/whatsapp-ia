@@ -1,4 +1,4 @@
-import { getActiveAccountSettings } from "./db";
+import type { AccountSettings } from "./db";
 
 // ─── Zonas no cubiertas por transportadoras estándar en Colombia ─────────────
 // Departamentos donde NO realizamos envíos por restricciones logísticas:
@@ -74,8 +74,8 @@ export function normalizeZoneName(raw: string): string {
     .trim();
 }
 
-function getConfiguredBlockedDepartments(): string[] {
-  const fromDb = getActiveAccountSettings()?.blocked_departments?.trim();
+function getConfiguredBlockedDepartments(settings?: AccountSettings | null): string[] {
+  const fromDb = settings?.blocked_departments?.trim();
   const raw = fromDb || (process.env.SHOPIFY_BLOCKED_DEPARTMENTS || "").trim();
   if (!raw) return DEFAULT_BLOCKED_DEPARTMENTS;
   return raw
@@ -84,8 +84,8 @@ function getConfiguredBlockedDepartments(): string[] {
     .filter(Boolean);
 }
 
-function getConfiguredBlockedCities(): string[] {
-  const fromDb = getActiveAccountSettings()?.blocked_cities?.trim();
+function getConfiguredBlockedCities(settings?: AccountSettings | null): string[] {
+  const fromDb = settings?.blocked_cities?.trim();
   const raw = fromDb || (process.env.SHOPIFY_BLOCKED_CITIES || "").trim();
   if (!raw) return DEFAULT_BLOCKED_CITIES;
   return raw
@@ -94,8 +94,8 @@ function getConfiguredBlockedCities(): string[] {
     .filter(Boolean);
 }
 
-function getConfiguredBlockedDepartmentCodes(): string[] {
-  const fromDb = getActiveAccountSettings()?.blocked_department_codes?.trim();
+function getConfiguredBlockedDepartmentCodes(settings?: AccountSettings | null): string[] {
+  const fromDb = settings?.blocked_department_codes?.trim();
   const raw = fromDb || (process.env.SHOPIFY_BLOCKED_DEPARTMENT_CODES || "").trim();
   if (!raw) return DEFAULT_BLOCKED_DEPARTMENT_CODES;
   return raw
@@ -202,15 +202,16 @@ export interface BlockedZoneResult {
 export function isBlockedZone(
   city: string | null | undefined,
   department: string | null | undefined,
-  departmentCode?: string | null | undefined
+  departmentCode?: string | null | undefined,
+  settings?: AccountSettings | null
 ): BlockedZoneResult {
   const normCity = normalizeZoneName(city || "");
   const normDept = normalizeZoneName(department || "");
   const normCode = normalizeZoneName(departmentCode || "");
 
-  const blockedDepts  = getConfiguredBlockedDepartments();
-  const blockedCities = getConfiguredBlockedCities();
-  const blockedCodes  = getConfiguredBlockedDepartmentCodes();
+  const blockedDepts  = getConfiguredBlockedDepartments(settings);
+  const blockedCities = getConfiguredBlockedCities(settings);
+  const blockedCodes  = getConfiguredBlockedDepartmentCodes(settings);
 
   // 1) Match por departamento (cualquier dept que contenga o sea contenido en blocked)
   for (const blocked of blockedDepts) {

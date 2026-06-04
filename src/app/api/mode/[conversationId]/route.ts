@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getConversationById, setMode } from "@/lib/db";
+import { setMode } from "@/lib/db";
+import { requireOwnedConversation } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   }
 
-  const conv = getConversationById(id);
-  if (!conv) {
+  if (!requireOwnedConversation(req, id)) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
 

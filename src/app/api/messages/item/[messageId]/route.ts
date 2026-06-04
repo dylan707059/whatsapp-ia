@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getMessageById,
   deleteMessageLocal,
-  enqueueRevoke,
-  getConversationById
+  enqueueRevoke
 } from "@/lib/db";
+import { requireOwnedConversation } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +29,10 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const msg = getMessageById(id);
   if (!msg) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
+  // El mensaje debe pertenecer a una conversación de la cuenta autenticada.
+  const conv = requireOwnedConversation(req, msg.conversation_id);
+  if (!conv) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+
   const target = req.nextUrl.searchParams.get("for") ?? "me";
 
   if (target === "everyone") {
@@ -39,8 +43,6 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
         { status: 400 }
       );
     }
-    const conv = getConversationById(msg.conversation_id);
-    if (!conv) return NextResponse.json({ error: "Conv inexistente" }, { status: 404 });
 
     enqueueRevoke(msg.conversation_id, conv.phone, msg.wa_msg_id, true);
     // El revoke real lo procesa el bot en el siguiente tick (~2s)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { archiveConversation, getConversationById } from "@/lib/db";
+import { archiveConversation } from "@/lib/db";
+import { requireOwnedConversation } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,15 +9,12 @@ interface Ctx {
   params: Promise<{ conversationId: string }>;
 }
 
-export async function POST(_req: NextRequest, { params }: Ctx) {
+export async function POST(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
+  if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  if (isNaN(id)) {
-    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  }
-
-  if (!getConversationById(id)) {
+  if (!requireOwnedConversation(req, id)) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
 

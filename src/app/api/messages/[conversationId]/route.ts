@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getConversationById,
-  getMessages,
-  insertMessage,
-  enqueueOutbox
-} from "@/lib/db";
+import { getMessages, insertMessage, enqueueOutbox } from "@/lib/db";
+import { requireOwnedConversation } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,16 +9,12 @@ interface Ctx {
   params: Promise<{ conversationId: string }>;
 }
 
-export async function GET(_req: NextRequest, { params }: Ctx) {
+export async function GET(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
+  if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  if (isNaN(id)) {
-    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  }
-
-  const conv = getConversationById(id);
-  if (!conv) {
+  if (!requireOwnedConversation(req, id)) {
     return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   }
 
@@ -33,15 +25,10 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
 export async function POST(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
+  if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  if (isNaN(id)) {
-    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  }
-
-  const conv = getConversationById(id);
-  if (!conv) {
-    return NextResponse.json({ error: "No encontrado" }, { status: 404 });
-  }
+  const conv = requireOwnedConversation(req, id);
+  if (!conv) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
   const body = await req.json() as { content?: string; role?: string };
 

@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getConversationById,
-  getLabelById,
   attachLabelToConversation,
   detachLabelFromConversation,
   getLabelsForConversation
 } from "@/lib/db";
+import { requireOwnedConversation, requireOwnedLabel } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,11 +12,11 @@ export const dynamic = "force-dynamic";
 interface Ctx { params: Promise<{ conversationId: string }>; }
 
 /** GET: lista las labels asignadas a esta conversación. */
-export async function GET(_req: NextRequest, { params }: Ctx) {
+export async function GET(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  if (!getConversationById(id)) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
+  if (!requireOwnedConversation(req, id)) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
 
   return NextResponse.json({ labels: getLabelsForConversation(id) });
 }
@@ -27,7 +26,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  if (!getConversationById(id)) return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
+  if (!requireOwnedConversation(req, id)) return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 });
 
   let body: { labelId?: number };
   try { body = await req.json() as typeof body; }
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
   const labelId = Number(body.labelId);
   if (!Number.isInteger(labelId)) return NextResponse.json({ error: "labelId requerido" }, { status: 400 });
-  if (!getLabelById(labelId)) return NextResponse.json({ error: "Label no encontrada" }, { status: 404 });
+  if (!requireOwnedLabel(req, labelId)) return NextResponse.json({ error: "Label no encontrada" }, { status: 404 });
 
   attachLabelToConversation(id, labelId);
   return NextResponse.json({ ok: true });
@@ -46,6 +45,7 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const { conversationId } = await params;
   const id = Number(conversationId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+  if (!requireOwnedConversation(req, id)) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
 
   const labelId = Number(req.nextUrl.searchParams.get("labelId"));
   if (!Number.isInteger(labelId)) return NextResponse.json({ error: "labelId requerido" }, { status: 400 });

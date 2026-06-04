@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLabelById, updateLabel, deleteLabel } from "@/lib/db";
+import { updateLabel, deleteLabel } from "@/lib/db";
+import { requireOwnedLabel } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   const id = Number(labelId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const existing = getLabelById(id);
+  const existing = requireOwnedLabel(req, id);
   if (!existing) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
 
   let body: { name?: string; color?: string };
@@ -31,11 +32,11 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, { params }: Ctx) {
+export async function DELETE(req: NextRequest, { params }: Ctx) {
   const { labelId } = await params;
   const id = Number(labelId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  if (!getLabelById(id)) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
+  if (!requireOwnedLabel(req, id)) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
 
   deleteLabel(id);
   return NextResponse.json({ ok: true });

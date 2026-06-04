@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   pinConversation,
   countPinnedConversations,
-  getConversationById,
   MAX_PINNED
 } from "@/lib/db";
-import { ownerPhoneFromRequest } from "@/lib/request-account";
+import { ownerPhoneFromRequest, requireOwnedConversation } from "@/lib/request-account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +16,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   const id = Number(conversationId);
   if (isNaN(id)) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
-  const conv = getConversationById(id);
+  const conv = requireOwnedConversation(req, id);
   if (!conv) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
   const pinnedCount = countPinnedConversations(ownerPhoneFromRequest(req));

@@ -6,6 +6,7 @@ import { jidToDisplay } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import OrderSummary from "./OrderSummary";
 import LabelsPopover from "./LabelsPopover";
+import ConversationInfo from "./ConversationInfo";
 import { useEventStream } from "./useEventStream";
 
 interface Props {
@@ -44,6 +45,7 @@ export default function ConversationPanel({
   const [input, setInput]         = useState("");
   const [sending, setSending]     = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
+  const [infoOpen, setInfoOpen]     = useState(false);
   const bottomRef                 = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,7 +161,11 @@ export default function ConversationPanel({
         >
           {initials}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <button
+          onClick={() => setInfoOpen((v) => !v)}
+          title="Ver información del cliente"
+          style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent" }}
+        >
           <div
             style={{
               fontWeight: 600,
@@ -174,6 +180,7 @@ export default function ConversationPanel({
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {name}
             </span>
+            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{infoOpen ? "▲" : "▾"}</span>
           </div>
           <div
             className="font-mono"
@@ -181,7 +188,7 @@ export default function ConversationPanel({
           >
             {jidToDisplay(conversation.phone)}
           </div>
-        </div>
+        </button>
 
         {/* Action buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -223,6 +230,18 @@ export default function ConversationPanel({
           </IconBtn>
         </div>
       </div>
+
+      {/* Panel de información del cliente (clic en el nombre) */}
+      {infoOpen && (
+        <ConversationInfo
+          conversation={conversation}
+          isPinned={isPinned}
+          isArchived={isArchived}
+          onPinToggle={onPinToggle ? () => onPinToggle(conversation.id, isPinned) : undefined}
+          onArchiveToggle={onArchiveToggle ? () => onArchiveToggle(conversation.id, isArchived) : undefined}
+          onClose={() => setInfoOpen(false)}
+        />
+      )}
 
       {/* Order summary */}
       <OrderSummary conversationId={conversation.id} />

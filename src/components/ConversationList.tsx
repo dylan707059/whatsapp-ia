@@ -31,8 +31,10 @@ function relativeTime(unixSeconds: number | null): string {
   return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
+// En la lista mostramos el NÚMERO (no el nombre). El nombre se ve en la
+// cabecera del chat y en el panel de información.
 function displayName(c: ConversationWithPreview): string {
-  return c.name?.trim() || jidToDisplay(c.phone);
+  return jidToDisplay(c.phone);
 }
 
 function initialsOf(name: string): string {
@@ -112,7 +114,7 @@ export default function ConversationList(props: Props) {
             type="text"
             value={props.search}
             onChange={(e) => props.onSearch(e.target.value)}
-            placeholder="Buscar..."
+            placeholder="Buscar número o nombre..."
             style={{
               flex: 1,
               background: "transparent",

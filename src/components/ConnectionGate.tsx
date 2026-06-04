@@ -151,11 +151,13 @@ export default function ConnectionGate() {
   // Filtros aplicados sobre las convs cargadas
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, ""); // dígitos para buscar por número
     return conversations.filter((c) => {
       if (labelFilter && !(c.labels ?? []).some((l) => l.id === labelFilter)) return false;
       if (q) {
         const inName = (c.name || "").toLowerCase().includes(q);
-        const inPhone = c.phone.toLowerCase().includes(q);
+        const inPhone = c.phone.toLowerCase().includes(q) ||
+          (qDigits.length > 0 && c.phone.replace(/\D/g, "").includes(qDigits));
         const inPreview = (c.last_message_preview || "").toLowerCase().includes(q);
         if (!inName && !inPhone && !inPreview) return false;
       }

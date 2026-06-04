@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ConversationWithPreview, ConversationMode } from "@/lib/types";
 import QRScreen from "./QRScreen";
 import SettingsScreen from "./SettingsScreen";
+import AccountsScreen from "./AccountsScreen";
 import Sidebar, { type View } from "./Sidebar";
 import ConversationList from "./ConversationList";
 import ConversationPanel from "./ConversationPanel";
@@ -24,6 +25,7 @@ export default function ConnectionGate() {
   const [labelFilter, setLabelFilter]     = useState<number | null>(null);
   // Pantalla de configuración: se abre con el botón ⚙️ del menú lateral.
   const [showSettings, setShowSettings]   = useState<boolean>(false);
+  const [showAccounts, setShowAccounts]   = useState<boolean>(false);
 
   const router = useRouter();
 
@@ -181,6 +183,11 @@ export default function ConnectionGate() {
     return <SettingsScreen allowSkip onSaved={() => setShowSettings(false)} />;
   }
 
+  // Pantalla de cuentas (solo admin; se abre desde el botón 👥).
+  if (showAccounts) {
+    return <AccountsScreen onClose={() => setShowAccounts(false)} />;
+  }
+
   // Antes de conectar WhatsApp: panel de configuración a la izquierda + QR a la
   // derecha. Al conectar, este layout desaparece y se muestra el dashboard.
   if (appStatus === "qr") {
@@ -236,6 +243,7 @@ export default function ConnectionGate() {
         ownerPhone={connectedPhone}
         onDisconnect={handleDisconnect}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenAccounts={() => setShowAccounts(true)}
         onLogout={handleLogout}
         onLabelFilter={setLabelFilter}
         activeLabelFilter={labelFilter}

@@ -228,6 +228,7 @@ db.exec(`
     business_name    TEXT,
     owner_phone      TEXT,
     automation_paused INTEGER NOT NULL DEFAULT 0,
+    is_admin         INTEGER NOT NULL DEFAULT 0,
     created_at       INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -334,6 +335,13 @@ db.exec(`
       .map(c => c.name);
     if (!cols.includes("automation_paused"))
       db.exec("ALTER TABLE accounts ADD COLUMN automation_paused INTEGER NOT NULL DEFAULT 0");
+    if (!cols.includes("is_admin"))
+      db.exec("ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+    // Garantizar al menos un admin: la cuenta más antigua si no hay ninguno.
+    const adminCount = db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE is_admin = 1").get() as { n: number };
+    if (adminCount.n === 0) {
+      db.exec("UPDATE accounts SET is_admin = 1 WHERE id = (SELECT id FROM accounts ORDER BY id ASC LIMIT 1)");
+    }
   }
 }
 
@@ -833,6 +841,7 @@ export interface Account {
   business_name: string | null;
   owner_phone: string | null;
   automation_paused: number;
+  is_admin: number;
   created_at: number;
 }
 
@@ -844,8 +853,8 @@ const stmtGetAccountByEmail = db.prepare<[string], Account>(
 const stmtGetAccountById = db.prepare<[number], Account>(
   "SELECT * FROM accounts WHERE id = ?"
 );
-const stmtInsertAccount = db.prepare<[string, string, string | null, string | null], Account>(
-  "INSERT INTO accounts (email, password_hash, business_name, owner_phone) VALUES (?, ?, ?, ?) RETURNING *"
+const stmtInsertAccount = db.prepare<[string, string, string | null, string | null, number], Account>(
+  "INSERT INTO accounts (email, password_hash, business_name, owner_phone, is_admin) VALUES (?, ?, ?, ?, ?) RETURNING *"
 );
 const stmtInsertSession = db.prepare<[string, number, number]>(
   "INSERT INTO sessions (token, account_id, expires_at) VALUES (?, ?, ?)"
@@ -867,9 +876,17 @@ export function createAccount(
   email: string,
   passwordHash: string,
   businessName: string | null = null,
-  ownerPhone: string | null = null
+  ownerPhone: string | null = null,
+  isAdmin = false
 ): Account {
-  return stmtInsertAccount.all(email.toLowerCase().trim(), passwordHash, businessName, ownerPhone)[0];
+  return stmtInsertAccount.all(email.toLowerCase().trim(), passwordHash, businessName, ownerPhone, isAdmin ? 1 : 0)[0];
+}
+
+const stmtIsAdmin = db.prepare<[number], { is_admin: number }>(
+  "SELECT is_admin FROM accounts WHERE id = ?"
+);
+export function isAccountAdmin(accountId: number): boolean {
+  return (stmtIsAdmin.get(accountId)?.is_admin ?? 0) === 1;
 }
 
 /** Crea una sesión nueva y devuelve su token (para guardar en cookie). */
@@ -1105,6 +1122,7 @@ function seedAccountFromEnv(
   passVar: string,
   bizVar: string,
   phoneVar: string,
+  isAdmin: boolean,
   defaultEmail?: string
 ): void {
   const password = process.env[passVar];
@@ -1116,24 +1134,25 @@ function seedAccountFromEnv(
     email,
     hashPassword(password),
     process.env[bizVar] || null,
-    process.env[phoneVar] || null
+    process.env[phoneVar] || null,
+    isAdmin
   );
   console.log(`[auth] Cuenta creada por seed: ${email}`);
 }
 
 if (process.env.NEXT_PHASE !== "phase-production-build") {
   try {
-    // Cuenta principal (email con valor por defecto para reducir fricción)
+    // Cuenta principal = admin (puede crear otras cuentas desde el dashboard)
     seedAccountFromEnv(
       "SEED_ACCOUNT_EMAIL", "SEED_ACCOUNT_PASSWORD",
       "SEED_ACCOUNT_BUSINESS", "SEED_ACCOUNT_OWNER_PHONE",
-      "dylangofo1@gmail.com"
+      true, "dylangofo1@gmail.com"
     );
-    // Cuenta secundaria opcional (para pruebas): define SEED_ACCOUNT2_EMAIL +
-    // SEED_ACCOUNT2_PASSWORD en el entorno y se crea sola.
+    // Cuenta secundaria opcional (para pruebas), NO admin.
     seedAccountFromEnv(
       "SEED_ACCOUNT2_EMAIL", "SEED_ACCOUNT2_PASSWORD",
-      "SEED_ACCOUNT2_BUSINESS", "SEED_ACCOUNT2_OWNER_PHONE"
+      "SEED_ACCOUNT2_BUSINESS", "SEED_ACCOUNT2_OWNER_PHONE",
+      false
     );
   } catch (err) {
     console.error("[auth] Error en auto-seed de cuentas:", err);

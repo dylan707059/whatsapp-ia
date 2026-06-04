@@ -21,6 +21,7 @@ interface Props {
   ownerPhone: string;
   onDisconnect: () => void;
   onOpenSettings?: () => void;
+  onOpenAccounts?: () => void;
   onLogout?: () => void;
   onLabelFilter?: (labelId: number | null) => void;
   activeLabelFilter?: number | null;
@@ -29,6 +30,14 @@ interface Props {
 export default function Sidebar(props: Props) {
   const [labels, setLabels] = useState<Label[]>([]);
   const [paused, setPaused] = useState<boolean | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => r.json() as Promise<{ isAdmin?: boolean }>)
+      .then((d) => setIsAdmin(Boolean(d.isAdmin)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/labels")
@@ -198,6 +207,11 @@ export default function Sidebar(props: Props) {
       {/* Configuración */}
       {props.onOpenSettings && (
         <FooterButton icon="⚙️" label="Configuración" onClick={props.onOpenSettings} />
+      )}
+
+      {/* Cuentas (solo admin) */}
+      {isAdmin && props.onOpenAccounts && (
+        <FooterButton icon="👥" label="Cuentas" onClick={props.onOpenAccounts} />
       )}
 
       {/* Disconnect */}

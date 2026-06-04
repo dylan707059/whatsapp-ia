@@ -853,14 +853,17 @@ export function markRevokeDone(id: number): void {
 // Buscar conversación reciente con orden SHOPIFY pendiente y matching de nombre
 // Se usa para deduplicar cuando un mensaje llega con JID @lid (que no matchea
 // la conv creada por el webhook Shopify con @s.whatsapp.net).
-const stmtFindShopifyByName = db.prepare<
-  [string, string, number],
+// Devuelve TODAS las convs SHOPIFY con pedido PENDING_CONFIRMATION recientes
+// del owner. El matching difuso por nombre se hace en JS (SQLite no puede
+// quitar emojis ni acentos de forma confiable).
+const stmtRecentShopifyConvs = db.prepare<
+  [string, number],
   Conversation
 >(`
   SELECT c.*
   FROM conversations c
   WHERE c.owner_phone = ?
-    AND LOWER(c.name) = LOWER(?)
+    AND c.phone LIKE '%@s.whatsapp.net'
     AND c.created_at >= ?
     AND EXISTS (
       SELECT 1 FROM orders o
@@ -869,17 +872,70 @@ const stmtFindShopifyByName = db.prepare<
         AND o.status = 'PENDING_CONFIRMATION'
     )
   ORDER BY c.created_at DESC
-  LIMIT 1
+  LIMIT 20
 `);
 
+// Normaliza un nombre para comparación difusa: minúsculas, sin acentos,
+// sin emojis ni símbolos, espacios colapsados.
+function normalizeName(raw: string): string {
+  return (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")        // acentos
+    .replace(/[^a-z0-9 ]/g, " ")            // emojis/símbolos → espacio
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Busca la conversación SHOPIFY (creada por el webhook, con phone real
+ * @s.whatsapp.net) que corresponde a un mensaje entrante por @lid, usando
+ * matching difuso de nombre. Estrategias en orden:
+ *   1. Nombre normalizado idéntico
+ *   2. Comparten el primer nombre (ej: "Sol" vs "Sol🌼" / "Sol Cisneros")
+ *   3. Si hay UNA sola conv SHOPIFY pendiente reciente → es ella (fallback)
+ */
 export function findRecentShopifyConversationByName(
   ownerPhone: string,
   name: string,
   withinSeconds = 1800
 ): Conversation | undefined {
-  if (!name) return undefined;
   const since = Math.floor(Date.now() / 1000) - withinSeconds;
-  return stmtFindShopifyByName.get(ownerPhone, name, since);
+  const candidates = stmtRecentShopifyConvs.all(ownerPhone, since);
+  if (candidates.length === 0) return undefined;
+
+  const target = normalizeName(name);
+
+  if (target) {
+    // 1) Match exacto normalizado
+    const exact = candidates.find((c) => normalizeName(c.name ?? "") === target);
+    if (exact) return exact;
+
+    // 2) Match por primer nombre (en cualquier dirección)
+    const targetFirst = target.split(" ")[0];
+    const byFirst = candidates.find((c) => {
+      const cn = normalizeName(c.name ?? "");
+      if (!cn) return false;
+      const cFirst = cn.split(" ")[0];
+      return cFirst === targetFirst
+        || cn.startsWith(target)
+        || target.startsWith(cn)
+        || cn.includes(targetFirst)
+        || target.includes(cFirst);
+    });
+    if (byFirst) return byFirst;
+  }
+
+  // 3) Fallback: si hay exactamente UNA conv shopify pendiente creada en los
+  //    últimos 10 min, es muy probable que sea el mismo cliente respondiendo
+  //    por @lid. Ventana corta para minimizar fusiones accidentales con
+  //    números random que escriban en ese rato.
+  if (candidates.length === 1) {
+    const recentCutoff = Math.floor(Date.now() / 1000) - 600;
+    if (candidates[0].created_at >= recentCutoff) return candidates[0];
+  }
+
+  return undefined;
 }
 
 // Borrar conversación

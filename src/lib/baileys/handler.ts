@@ -162,12 +162,15 @@ async function processMessage(
   // pendiente con el mismo nombre, reusamos esa conversación y registramos
   // el mapping LID → phone para los próximos mensajes.
   let convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
-  if (jid.endsWith("@lid") && pushName) {
-    const shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName);
+  if (jid.endsWith("@lid")) {
+    // Matching difuso por nombre (sin emojis/acentos) + fallback de candidato
+    // único. Antes exigía pushName exacto == nombre Shopify, lo que fallaba
+    // cuando el cliente tenía emojis en el nombre ("Sol🌼" vs "Sol").
+    const shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
     if (shopifyConv && shopifyConv.id !== convo.id) {
       console.log(
         `[bot] LID ${jid} matchea con conv SHOPIFY #${shopifyConv.id} (${shopifyConv.phone}) ` +
-        `por pushName "${pushName}" — fusionando, descartando conv duplicada #${convo.id}`
+        `por nombre "${pushName ?? "(sin nombre)"}" — fusionando, descartando conv duplicada #${convo.id}`
       );
       // Registrar mapping para futuros mensajes
       registerContact(shopifyConv.phone, jid);

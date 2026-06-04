@@ -12,7 +12,8 @@ import path from "node:path";
 import fs from "node:fs";
 import {
   setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused,
-  getConversationByPhone, archiveConversation, unarchiveConversation, discardPendingOutboxForOwner
+  getConversationByPhone, archiveConversation, unarchiveConversation, discardPendingOutboxForOwner,
+  upsertWaLabel
 } from "../db";
 import { setupMessageHandler } from "./handler";
 import { registerContact } from "./contact-store";
@@ -153,6 +154,26 @@ async function _start(accountId: number): Promise<void> {
   });
   sock.ev.on("contacts.update", (contacts) => {
     for (const c of contacts) registerContact(c.id, (c as { lid?: string }).lid);
+  });
+
+  // Etiquetas nativas de WhatsApp Business: las capturamos al sincronizar
+  // (app-state) para poder etiquetar chats en el WhatsApp real más tarde.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sock.ev.on("labels.edit", (label: any) => {
+    const phone = (sock.user?.id ?? "").split(":")[0];
+    if (!phone || !label?.id) return;
+    try {
+      upsertWaLabel(phone, {
+        id: String(label.id),
+        name: label.name ?? null,
+        color: typeof label.color === "number" ? label.color : null,
+        predefinedId: label.predefinedId != null ? Number(label.predefinedId) : null,
+        deleted: Boolean(label.deleted)
+      });
+      console.log(`[bot] (acc ${accountId}) Etiqueta WA capturada: "${label.name}" id=${label.id} predef=${label.predefinedId ?? "-"}`);
+    } catch (err) {
+      console.error("[bot] Error guardando etiqueta WA:", err);
+    }
   });
 
   sock.ev.on("messages.upsert", ({ messages }) => {

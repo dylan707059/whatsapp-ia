@@ -237,6 +237,19 @@ db.exec(`
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
+  -- Etiquetas nativas de WhatsApp Business capturadas vía eventos labels.edit.
+  -- Se usan para etiquetar chats en el WhatsApp real (no en el panel).
+  CREATE TABLE IF NOT EXISTS wa_labels (
+    owner_phone   TEXT NOT NULL,
+    label_id      TEXT NOT NULL,
+    name          TEXT,
+    color         INTEGER,
+    predefined_id INTEGER,
+    deleted       INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (owner_phone, label_id)
+  );
+
   -- ─── Multi-cuenta (login) ───────────────────────────────────────────────────
   -- Cada cuenta es un negocio distinto. Los datos del sistema se asocian al
   -- negocio via owner_phone (el numero de WhatsApp conectado de esa cuenta).
@@ -1364,6 +1377,81 @@ export function isAutomationPausedForPhone(phone: string): boolean {
   if (!phone) return false;
   const acc = getAccountByOwnerPhone(phone);
   return acc ? acc.automation_paused === 1 : false;
+}
+
+// ─── Etiquetas nativas de WhatsApp Business ───────────────────────────────────
+export interface WaLabel {
+  owner_phone: string;
+  label_id: string;
+  name: string | null;
+  color: number | null;
+  predefined_id: number | null;
+  deleted: number;
+}
+
+const stmtUpsertWaLabel = db.prepare<[string, string, string | null, number | null, number | null, number]>(
+  `INSERT INTO wa_labels (owner_phone, label_id, name, color, predefined_id, deleted, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, unixepoch())
+   ON CONFLICT(owner_phone, label_id) DO UPDATE SET
+     name = excluded.name, color = excluded.color,
+     predefined_id = excluded.predefined_id, deleted = excluded.deleted,
+     updated_at = unixepoch()`
+);
+const stmtListWaLabels = db.prepare<[string], WaLabel>(
+  "SELECT * FROM wa_labels WHERE owner_phone = ? AND deleted = 0"
+);
+
+export function upsertWaLabel(ownerPhone: string, label: {
+  id: string; name?: string | null; color?: number | null;
+  predefinedId?: number | null; deleted?: boolean;
+}): void {
+  stmtUpsertWaLabel.run(
+    ownerPhone, label.id, label.name ?? null, label.color ?? null,
+    label.predefinedId ?? null, label.deleted ? 1 : 0
+  );
+}
+
+export function listWaLabels(ownerPhone: string): WaLabel[] {
+  return stmtListWaLabels.all(ownerPhone);
+}
+
+// Normaliza para comparar nombres de etiqueta (sin acentos/emojis/case).
+function normLabelName(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Busca el label_id de una etiqueta por nombre (difuso). Para "Nuevo pedido"
+ * también matchea la predefinida de WhatsApp Business (predefinedId = 2 =
+ * "New order"). Devuelve undefined si no se encontró.
+ */
+export function findWaLabelIdByName(ownerPhone: string, name: string): string | undefined {
+  const target = normLabelName(name);
+  const labels = listWaLabels(ownerPhone);
+
+  // 1) Match por nombre normalizado
+  const byName = labels.find((l) => normLabelName(l.name ?? "") === target);
+  if (byName) return byName.label_id;
+
+  // 2) "Nuevo pedido" / "new order" → predefinida #2 de WhatsApp Business
+  const isNuevoPedido = target.includes("nuevo pedido") || target.includes("new order");
+  if (isNuevoPedido) {
+    const predef = labels.find((l) => l.predefined_id === 2);
+    if (predef) return predef.label_id;
+  }
+
+  // 3) Match parcial por inclusión
+  const partial = labels.find((l) => {
+    const ln = normLabelName(l.name ?? "");
+    return ln && (ln.includes(target) || target.includes(ln));
+  });
+  return partial?.label_id;
 }
 
 // ─── Auto-seed de la cuenta inicial desde variables de entorno ────────────────

@@ -14,7 +14,9 @@ import {
   advancePendingOutbox,
   findRecentShopifyConversationByName,
   deleteConversation,
-  isAutomationPausedForPhone
+  isAutomationPausedForPhone,
+  findWaLabelIdByName,
+  listWaLabels
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
@@ -387,7 +389,55 @@ async function handleConfirmation(
   const snapshot = { ...orderData };
   await sendOwnerNotificationSequentially(sock, snapshot);
 
+  // Etiquetar el chat en el WhatsApp Business real con "Nuevo pedido".
+  try {
+    await applyNuevoPedidoLabel(sock, fresh.phone);
+  } catch (err) {
+    console.error(`[bot] Error etiquetando chat ${fresh.phone}:`, err);
+  }
+
   console.log(`[bot] Finalizando tarea en cola: confirmacion ${conversationId}`);
+}
+
+// ─── Etiqueta nativa de WhatsApp Business al confirmar ────────────────────────
+const LABEL_TARGET = process.env.WA_CONFIRM_LABEL ?? "Nuevo pedido";
+
+async function applyNuevoPedidoLabel(sock: WASocket, convPhoneJid: string): Promise<void> {
+  const ownerPhone = (sock.user?.id ?? "").split(":")[0];
+  if (!ownerPhone) {
+    console.warn("[bot] [label] Sin owner phone — no se etiqueta");
+    return;
+  }
+
+  // Las etiquetas funcionan mejor sobre el JID real (@s.whatsapp.net).
+  // Si la conv quedó como @lid, igual lo intentamos pero avisamos.
+  const jid = convPhoneJid;
+  if (jid.endsWith("@lid")) {
+    console.warn(`[bot] [label] Chat ${jid} es @lid — el etiquetado puede no aplicar`);
+  }
+
+  const labelId = findWaLabelIdByName(ownerPhone, LABEL_TARGET);
+  if (!labelId) {
+    const available = listWaLabels(ownerPhone)
+      .map((l) => `"${l.name}"(id=${l.label_id},predef=${l.predefined_id ?? "-"})`)
+      .join(", ");
+    console.warn(
+      `[bot] [label] No encontré la etiqueta "${LABEL_TARGET}" para ${ownerPhone}. ` +
+      `Etiquetas disponibles: ${available || "(ninguna sincronizada todavía)"}. ` +
+      `Asegurate de tener la etiqueta creada en WhatsApp Business.`
+    );
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anySock = sock as any;
+  if (typeof anySock.addChatLabel !== "function") {
+    console.warn("[bot] [label] addChatLabel no disponible en esta versión de Baileys");
+    return;
+  }
+
+  await anySock.addChatLabel(jid, labelId);
+  console.log(`[bot] [label] ✅ Etiqueta "${LABEL_TARGET}" (id=${labelId}) aplicada a ${jid}`);
 }
 
 // ─── Reclamo ──────────────────────────────────────────────────────────────────

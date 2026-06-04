@@ -12,6 +12,7 @@ import {
   setConversationMode,
   isClientBlocked,
   advancePendingOutbox,
+  discardPendingOutboxForConversation,
   findRecentShopifyConversationByName,
   deleteConversation,
   isAutomationPausedForPhone,
@@ -222,21 +223,11 @@ async function processMessage(
     }
   }
 
-  // ─── Adelantar outbox programado (confirmaciones Shopify diferidas) ───────
-  // Si hay un mensaje pendiente con scheduled_at futuro (típicamente la
-  // confirmación de pedido Shopify que esperaba 3 min), lo enviamos YA porque
-  // el cliente ya nos escribió — evita el delay innecesario y respeta el
-  // flujo anti-bloqueo: solo enviamos cuando hay una ventana de servicio
-  // abierta de su lado.
-  const advanced = advancePendingOutbox(convo.id);
-  if (advanced > 0) {
-    console.log(
-      `[bot] Cliente ${jid} escribió primero — adelantando ${advanced} mensaje(s) en outbox`
-    );
-  }
-
   // ─── Reclamo ──────────────────────────────────────────────────────────────
+  // Descartamos el template pendiente: si el cliente reclama, mandarle
+  // "por favor confirma tu pedido" 3 min después sería muy mala UX.
   if (isComplaintMessage(text)) {
+    discardPendingOutboxForConversation(convo.id);
     await handleComplaint(sock, jid, convo.id, senderPhone, text, ownerPhone);
     return;
   }
@@ -252,7 +243,11 @@ async function processMessage(
   const activeOrderForConv = getActiveOrder(convo.id);
 
   // ─── Confirmación del cliente ─────────────────────────────────────────────
-  // La confirmación pasa por la cola incluso con IA pausada (HUMAN mode)
+  // La confirmación pasa por la cola incluso con IA pausada (HUMAN mode).
+  // IMPORTANTE: descartamos el template pendiente ANTES de encolar la tarea.
+  // Sin esto, cuando el cliente confirma con su primer mensaje ("listo", "ok"),
+  // el flujo avanzaría el template Y handleConfirmation enviaría "Perfecto" →
+  // el cliente recibiría dos mensajes del bot (el template + la confirmación).
   if (isConfirmationMessage(text)) {
     const snapId     = convo.id;
     const snapJid    = jid;
@@ -260,6 +255,7 @@ async function processMessage(
     const snapPhone  = senderPhone;
 
     console.log(`[bot] Tarea agregada a cola: confirmacion ${snapId}`);
+    discardPendingOutboxForConversation(snapId);
 
     enqueueOrderTask(`confirmacion:${snapId}`, async () => {
       await withCustomerLock(snapPhone, async () => {
@@ -267,6 +263,16 @@ async function processMessage(
       });
     });
     return;
+  }
+
+  // ─── Adelantar outbox programado (confirmaciones Shopify diferidas) ───────
+  // Solo para mensajes normales (ni reclamo ni confirmación): si hay un template
+  // pendiente con scheduled_at futuro, lo enviamos YA porque el cliente escribió.
+  const advanced = advancePendingOutbox(convo.id);
+  if (advanced > 0) {
+    console.log(
+      `[bot] Cliente ${jid} escribió primero — adelantando ${advanced} mensaje(s) en outbox`
+    );
   }
 
   // ─── Flujo normal de IA ───────────────────────────────────────────────────

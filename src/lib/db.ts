@@ -680,6 +680,14 @@ export function advancePendingOutbox(conversationId: number): number {
   return result.changes;
 }
 
+const stmtDiscardOutboxForConv = db.prepare<[number]>(
+  "UPDATE outbox SET sent = 1 WHERE sent = 0 AND conversation_id = ?"
+);
+
+export function discardPendingOutboxForConversation(conversationId: number): number {
+  return stmtDiscardOutboxForConv.run(conversationId).changes;
+}
+
 // ─── Mensajes: helpers WhatsApp ID + borrado ─────────────────────────────────
 const stmtGetMessageById = db.prepare<[number], {
   id: number; conversation_id: number; role: string; content: string;

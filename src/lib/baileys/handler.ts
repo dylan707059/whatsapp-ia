@@ -42,8 +42,26 @@ import { resolvePhone } from "./contact-store";
 import { enqueueOrderTask } from "../queue";
 import { insertOrderEvent } from "../order-events";
 import { withCustomerLock } from "../customer-lock";
+import type { Conversation } from "../types";
 
 const AI_PAUSE_MINUTES = 30;
+
+// Extrae el primer número de teléfono colombiano de un texto.
+// Detecta: +573117678790  /  573117678790  /  3117678790  (con/sin espacios y guiones)
+function extractColombianPhone(text: string): string | null {
+  const patterns = [
+    /\+?57[\s\-]?(3[\d]{2})[\s\-]?([\d]{3})[\s\-]?([\d]{4})/,  // con código de país
+    /\b(3\d{2})[\s\-]?([\d]{3})[\s\-]?([\d]{4})\b/               // solo número local
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (!m) continue;
+    const digits = m[0].replace(/\D/g, "");
+    if (digits.startsWith("57") && digits.length === 12) return digits;
+    if (digits.startsWith("3")  && digits.length === 10) return `57${digits}`;
+  }
+  return null;
+}
 
 function isIndividualJid(jid: string): boolean {
   return jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid");
@@ -163,17 +181,16 @@ async function processMessage(
 
   // ─── Deduplicación de conversación por LID ────────────────────────────────
   // Si el mensaje llega con JID @lid, puede que ya exista la conv creada por
-  // Shopify con el teléfono real. Estrategia de matching en orden de fiabilidad:
-  //   1. Por teléfono: si el contact-store sabe que este @lid = teléfono X,
-  //      buscamos directamente la conv de ese teléfono. Es el match más fiable.
-  //   2. Por nombre: si no tenemos el teléfono, buscamos por nombre difuso en
-  //      las convs Shopify PENDING recientes. Menos fiable pero funciona para
-  //      clientes nuevos cuyo @lid aún no está en el contact-store.
+  // Shopify con el teléfono real. Estrategia en orden de fiabilidad:
+  //   1. Contact-store: WhatsApp ya nos dijo que @lid X = teléfono Y → match directo.
+  //   2. Teléfono en el mensaje: Releasit manda mensajes con "📱 Teléfono: +57..."
+  //      Extraemos ese número y buscamos la conv de Shopify por JID.
+  //   3. Nombre difuso: si no hay teléfono en el texto, buscamos por nombre.
   let convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
   if (jid.endsWith("@lid")) {
-    let shopifyConv: ReturnType<typeof getConversationByPhone> | ReturnType<typeof findRecentShopifyConversationByName> = undefined;
+    let shopifyConv: Conversation | undefined;
 
-    // 1. Match por teléfono (contact-store ya conoce el mapeo @lid → número)
+    // 1. Match por contact-store (mapeo persistido @lid → número real)
     const resolvedPhone = resolvePhone(jid);
     const rawLid = jid.split("@")[0];
     if (resolvedPhone && resolvedPhone !== rawLid) {
@@ -181,22 +198,29 @@ async function processMessage(
       const byPhone = getConversationByPhone(phoneJid, ownerPhone);
       if (byPhone && byPhone.id !== convo.id) {
         shopifyConv = byPhone;
-        console.log(
-          `[bot] LID ${jid} → teléfono ${resolvedPhone} (contact-store) — ` +
-          `fusionando con conv #${byPhone.id}`
-        );
+        console.log(`[bot] LID ${jid} → ${resolvedPhone} (contact-store) — conv #${byPhone.id}`);
       }
     }
 
-    // 2. Fallback: match por nombre cuando no hay mapeo de teléfono aún
+    // 2. Teléfono extraído del texto del mensaje (ej: mensaje de checkout de Releasit)
+    if (!shopifyConv && text?.trim()) {
+      const extracted = extractColombianPhone(text);
+      if (extracted) {
+        const extractedJid = `${extracted}@s.whatsapp.net`;
+        const byExtracted = getConversationByPhone(extractedJid, ownerPhone);
+        if (byExtracted && byExtracted.id !== convo.id) {
+          shopifyConv = byExtracted;
+          console.log(`[bot] LID ${jid}: teléfono extraído del mensaje "${extracted}" → conv #${byExtracted.id}`);
+        }
+      }
+    }
+
+    // 3. Fallback: nombre difuso en convs Shopify PENDING recientes
     if (!shopifyConv) {
-      shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
-      if (shopifyConv?.id === convo.id) shopifyConv = undefined;
-      if (shopifyConv) {
-        console.log(
-          `[bot] LID ${jid} matchea con conv SHOPIFY #${shopifyConv.id} (${shopifyConv.phone}) ` +
-          `por nombre "${pushName ?? "(sin nombre)"}" — fusionando, descartando conv duplicada #${convo.id}`
-        );
+      const byName = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
+      if (byName && byName.id !== convo.id) {
+        shopifyConv = byName;
+        console.log(`[bot] LID ${jid}: nombre "${pushName ?? ""}" → conv #${byName.id}`);
       }
     }
 

@@ -38,9 +38,9 @@ function relativeTime(unixSeconds: number | null): string {
   return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
-// Título de la fila: número formateado (teléfono real) o nombre (ID privacidad).
+// Título de la fila: número del pedido (para @lid), o número del JID, o nombre.
 function displayName(c: ConversationWithPreview): string {
-  return chatDisplayTitle(c.phone, c.name);
+  return chatDisplayTitle(c.phone, c.name, c.order_phone);
 }
 
 // Avatar: iniciales del nombre si lo hay; si no, los últimos 2 dígitos del

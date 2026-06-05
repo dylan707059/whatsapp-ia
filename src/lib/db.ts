@@ -418,9 +418,9 @@ const stmtGetConvById = db.prepare<[number], Conversation>(
 const stmtSetMode = db.prepare<[string, number]>(
   "UPDATE conversations SET mode = ? WHERE id = ?"
 );
-const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
-  SELECT
+const CONV_SELECT_FIELDS = `
     c.*,
+    (SELECT phone FROM orders WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS order_phone,
     (SELECT CASE
        WHEN media_type = 'image'    THEN '📷 ' || COALESCE(NULLIF(content,''), 'Foto')
        WHEN media_type = 'video'    THEN '🎥 ' || COALESCE(NULLIF(content,''), 'Video')
@@ -428,7 +428,10 @@ const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
        ELSE content END
      FROM messages
      WHERE conversation_id = c.id
-     ORDER BY created_at DESC LIMIT 1) AS last_message_preview
+     ORDER BY created_at DESC LIMIT 1) AS last_message_preview`;
+
+const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
+  SELECT ${CONV_SELECT_FIELDS}
   FROM conversations c
   WHERE c.owner_phone = ?
     AND c.archived_at IS NULL
@@ -439,16 +442,7 @@ const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
 `);
 
 const stmtListArchivedConversations = db.prepare<[string], ConversationWithPreview>(`
-  SELECT
-    c.*,
-    (SELECT CASE
-       WHEN media_type = 'image'    THEN '📷 ' || COALESCE(NULLIF(content,''), 'Foto')
-       WHEN media_type = 'video'    THEN '🎥 ' || COALESCE(NULLIF(content,''), 'Video')
-       WHEN media_type = 'document' THEN '📄 ' || COALESCE(NULLIF(media_filename,''), 'Documento')
-       ELSE content END
-     FROM messages
-     WHERE conversation_id = c.id
-     ORDER BY created_at DESC LIMIT 1) AS last_message_preview
+  SELECT ${CONV_SELECT_FIELDS}
   FROM conversations c
   WHERE c.owner_phone = ?
     AND c.archived_at IS NOT NULL

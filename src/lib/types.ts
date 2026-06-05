@@ -38,6 +38,7 @@ export interface LabelLite {
 
 export interface ConversationWithPreview extends Conversation {
   last_message_preview: string | null;
+  order_phone: string | null;
   labels?: LabelLite[];
 }
 
@@ -157,13 +158,21 @@ export function formatPhoneNumber(raw: string): string {
 
 /**
  * Título a mostrar para una conversación.
- * - Teléfono real (@s.whatsapp.net): número formateado.
- * - ID de privacidad (@lid): no hay número usable → muestra el nombre,
- *   o un identificador corto si no hay nombre.
+ * - @s.whatsapp.net → número formateado del JID.
+ * - @lid → orderPhone si lo hay (viene de Shopify), sino nombre, sino "Contacto".
+ * El orderPhone es el número más fiable para @lid: viene directamente del pedido.
  */
-export function chatDisplayTitle(jid: string, name?: string | null): string {
+export function chatDisplayTitle(
+  jid: string,
+  name?: string | null,
+  orderPhone?: string | null
+): string {
   if (jid.endsWith("@s.whatsapp.net")) {
     return formatPhoneNumber(jid.split("@")[0]);
+  }
+  // @lid: preferir número del pedido (fuente más fiable)
+  if (orderPhone?.trim()) {
+    return formatPhoneNumber(orderPhone.trim());
   }
   const n = name?.trim();
   if (n) return n;

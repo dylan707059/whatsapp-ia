@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Conversation, Message } from "@/lib/types";
+import type { ConversationWithPreview, Message } from "@/lib/types";
 import { jidToDisplay, chatDisplayTitle, formatPhoneNumber } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import OrderSummary from "./OrderSummary";
@@ -10,7 +10,7 @@ import ConversationInfo from "./ConversationInfo";
 import { useEventStream } from "./useEventStream";
 
 interface Props {
-  conversation: Conversation;
+  conversation: ConversationWithPreview;
   onModeChange: (id: number, mode: "AI" | "HUMAN") => void;
   onDelete: (id: number) => void;
 }
@@ -215,11 +215,13 @@ export default function ConversationPanel({
     onDelete(conversation.id);
   }
 
-  const name = conversation.name?.trim() || chatDisplayTitle(conversation.phone, conversation.name);
+  const name = conversation.name?.trim() || chatDisplayTitle(conversation.phone, conversation.name, conversation.order_phone);
   const isRealPhone = conversation.phone.endsWith("@s.whatsapp.net");
   const phoneLine = isRealPhone
     ? formatPhoneNumber(jidToDisplay(conversation.phone))
-    : `ID privacidad …${jidToDisplay(conversation.phone).slice(-4)}`;
+    : conversation.order_phone
+      ? formatPhoneNumber(conversation.order_phone)
+      : `ID privacidad …${jidToDisplay(conversation.phone).slice(-4)}`;
   const [g1, g2] = avatarColors(name);
   const initials = initialsOf(name);
 

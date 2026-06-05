@@ -122,11 +122,27 @@ export function parseShopifyOrder(payload: ShopifyOrderPayload): ParsedShopifyOr
     gateway.includes("contraentrega") ||
     gateway.includes("cod");
 
+  // Algunos merchants agregan el envío como line_item en vez de shipping_line.
+  // Los separamos para no mostrarlos como producto en el mensaje al cliente.
+  const SHIPPING_KEYWORDS = /envio|envío|shipping|flete|domicilio|courier|despacho/i;
+  const productItems = (payload.line_items ?? []).filter(
+    (li) => !SHIPPING_KEYWORDS.test(li.title)
+  );
+  const shippingLineItem = (payload.line_items ?? []).find(
+    (li) => SHIPPING_KEYWORDS.test(li.title)
+  );
+
   const shippingLineTitle = payload.shipping_lines?.[0]?.title ?? "";
   const shippingPrice = Number(payload.shipping_lines?.[0]?.price ?? "0");
-  const shippingLabel = shippingPrice === 0 ? "Gratis" : shippingLineTitle || `$${shippingPrice}`;
+  // Si el envío viene como line_item, usarlo como label de envío
+  const shippingLabel =
+    shippingPrice > 0
+      ? shippingLineTitle || formatCurrencySimple(shippingPrice)
+      : shippingLineItem
+        ? `${shippingLineItem.title} · ${formatCurrencySimple(Number(shippingLineItem.price ?? "0"))}`
+        : "Gratis";
 
-  const items = (payload.line_items ?? []).map((li) => ({
+  const items = productItems.map((li) => ({
     title: li.title,
     variantTitle: li.variant_title ?? "",
     quantity: li.quantity ?? 1
@@ -375,6 +391,10 @@ export function buildConfirmationMessage(parsed: ParsedShopifyOrder): string {
 }
 
 // ─── Helpers de formato ───────────────────────────────────────────────────────
+
+function formatCurrencySimple(amount: number): string {
+  return `$${amount.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 function formatCurrency(amount: string, currency: string): string {
   const num = Number(amount);

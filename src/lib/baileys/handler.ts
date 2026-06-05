@@ -100,11 +100,18 @@ async function processMessage(
     const msgId: string = msg.key?.id ?? "";
     if (isBotSentMessage(msgId)) return; // skip ecos de mensajes que mando el bot
 
-    // Crear/obtener la conversación con el destinatario para guardarlo.
-    // NO pasamos pushName: en mensajes fromMe, pushName es el nombre de la
-    // cuenta del dueño ("Eclipse", etc.), no el nombre del cliente. Pasarlo
-    // pisaría el nombre real del cliente con el nombre de la tienda.
-    const conv = getOrCreateConversation(jid, null, ownerPhone);
+    // Resolver la conv correcta para el destinatario.
+    // Si el destinatario es @lid, buscamos la conv real por teléfono (contact-store)
+    // para que el mensaje aparezca en el chat correcto del panel.
+    let targetJid = jid;
+    if (jid.endsWith("@lid")) {
+      const resolved = resolvePhone(jid);
+      const rawLid = jid.split("@")[0];
+      if (resolved && resolved !== rawLid) {
+        targetJid = resolved.includes("@") ? resolved : `${resolved}@s.whatsapp.net`;
+      }
+    }
+    const conv = getOrCreateConversation(targetJid, null, ownerPhone);
 
     // Multimedia enviada desde el celular → reflejarla en el panel.
     const fromMeMedia = detectMedia(msg.message);

@@ -5,8 +5,10 @@ import {
   getPendingOutbox, claimOutboxItem, unclaimOutboxItem, enqueueOutbox, insertMessage,
   setMessageWaId, getPendingRevokes, markRevokeDone,
   listAllAccounts, getAccountConnection, getConversationById,
-  isAccountAutomationPaused, getAppState, setAppState, getAccountById
+  isAccountAutomationPaused, getAppState, setAppState, getAccountById,
+  findRecentLidConversationByName, mergeConversationInto
 } from "./db";
+import { registerContact } from "./baileys/contact-store";
 import {
   getOrdersNeedingReminder,
   getOrdersToAutoCancel,
@@ -261,6 +263,29 @@ export function startBotRuntime(): void {
 
       // Marca de agua: solo pedidos creados DESPUÉS de la última activación.
       const resumedAt = getAccountById(h.accountId)?.automation_resumed_at ?? 0;
+
+      // ─── Auto-fusión previa al recordatorio ──────────────────────────────────
+      // Antes de enviar recordatorios, intentar unir chats @lid huérfanos con
+      // la conv del pedido. Evita mandar recordatorios por chats divididos donde
+      // el cliente ya confirmó por el otro chat.
+      const candidatesForMerge = getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)
+        .filter((o) => o.created_at >= resumedAt && nowSec - o.created_at <= REMINDER_MAX_AGE);
+      for (const order of candidatesForMerge) {
+        if (!order.conv_name) continue;
+        try {
+          const lidConv = findRecentLidConversationByName(currentOwner, order.conv_name, 14400); // 4h
+          if (lidConv && lidConv.id !== order.conversation_id) {
+            console.log(
+              `[bot] Auto-fusión: conv @lid #${lidConv.id} → conv pedido #${order.conversation_id} ` +
+              `(${order.conv_name}) antes de recordatorio`
+            );
+            mergeConversationInto(lidConv.id, order.conversation_id);
+            registerContact(order.conv_phone, lidConv.phone);
+          }
+        } catch (err) {
+          console.error(`[bot] Error en auto-fusión para order #${order.id}:`, err);
+        }
+      }
 
       const due = getOrdersNeedingReminder(currentOwner, REMINDER_MAX, REMINDER_INTERVAL)
         .filter((o) => o.created_at >= resumedAt && nowSec - o.created_at <= REMINDER_MAX_AGE);

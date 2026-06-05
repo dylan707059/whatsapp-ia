@@ -271,6 +271,8 @@ const stmtOrdersNeedingReminder = db.prepare<
   JOIN conversations c ON o.conversation_id = c.id
   WHERE o.source = 'SHOPIFY'
     AND o.status = 'PENDING_CONFIRMATION'
+    AND c.confirmed_at IS NULL
+    AND c.owner_notified_at IS NULL
     AND c.owner_phone = ?
     AND o.reminder_count < ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?
@@ -292,6 +294,8 @@ const stmtOrdersToCancel = db.prepare<
   JOIN conversations c ON o.conversation_id = c.id
   WHERE o.source = 'SHOPIFY'
     AND o.status = 'PENDING_CONFIRMATION'
+    AND c.confirmed_at IS NULL
+    AND c.owner_notified_at IS NULL
     AND c.owner_phone = ?
     AND o.reminder_count >= ?
     AND COALESCE(o.last_reminder_at, o.created_at) <= ?

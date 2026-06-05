@@ -235,6 +235,26 @@ export default function ConnectionGate() {
     }
   }
 
+  async function handleMerge(fromId: number, toId: number) {
+    try {
+      const res = await fetch(`/api/conversations/${fromId}/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: toId })
+      });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({})) as { error?: string };
+        alert(error || "No se pudo fusionar");
+        return;
+      }
+      // Eliminar el chat origen de la lista y seleccionar el destino
+      setConversations((prev) => prev.filter((c) => c.id !== fromId));
+      if (selectedId === fromId) setSelectedId(toId);
+    } catch (err) {
+      console.error("Error fusionando:", err);
+    }
+  }
+
   // Filtros aplicados sobre las convs cargadas
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -369,6 +389,7 @@ export default function ConnectionGate() {
         onMuteToggle={handleMuteToggle}
         onBlockToggle={handleBlockToggle}
         onOrderAction={handleOrderAction}
+        onMerge={handleMerge}
       />
 
       <main style={{ background: "var(--bg)", overflow: "hidden", display: "flex", flexDirection: "column" }}>

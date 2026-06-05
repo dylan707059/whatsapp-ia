@@ -19,9 +19,11 @@ interface Props {
   onMuteToggle?: (id: number, muted: boolean) => void;
   onBlockToggle?: (id: number, blocked: boolean) => void;
   onOrderAction?: (conversationId: number, action: "dispatch" | "cancel") => void;
+  onMerge?: (fromId: number, toId: number) => void;
 }
 
 interface MenuState { x: number; y: number; conv: ConversationWithPreview; }
+interface MergeState { fromConv: ConversationWithPreview; search: string; }
 
 function relativeTime(unixSeconds: number | null): string {
   if (!unixSeconds) return "";
@@ -82,6 +84,7 @@ export default function ConversationList(props: Props) {
   const recent = props.conversations.filter((c) => !c.pinned_at);
 
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [mergeState, setMergeState] = useState<MergeState | null>(null);
 
   useEffect(() => {
     if (!menu) return;
@@ -288,6 +291,99 @@ export default function ConversationList(props: Props) {
               />
             </>
           )}
+          {props.onMerge && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              <MenuItem
+                label="Fusionar con..."
+                icon="🔗"
+                onClick={() => { setMergeState({ fromConv: menu.conv, search: "" }); setMenu(null); }}
+              />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Modal de fusión */}
+      {mergeState && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 2000,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center"
+          }}
+          onClick={() => setMergeState(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-elev)", borderRadius: 12,
+              border: "1px solid var(--border)",
+              boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+              width: 340, maxHeight: 480,
+              display: "flex", flexDirection: "column", overflow: "hidden"
+            }}
+          >
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+                🔗 Fusionar chat
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Los mensajes de <b>{chatDisplayTitle(mergeState.fromConv.phone, mergeState.fromConv.name, mergeState.fromConv.order_phone)}</b> se moverán al chat que selecciones
+              </div>
+            </div>
+            <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
+              <input
+                autoFocus
+                placeholder="Buscar por nombre o número..."
+                value={mergeState.search}
+                onChange={(e) => setMergeState({ ...mergeState, search: e.target.value })}
+                style={{
+                  width: "100%", padding: "7px 10px", borderRadius: 7,
+                  background: "var(--bg)", border: "1px solid var(--border)",
+                  color: "var(--text)", fontSize: 13
+                }}
+              />
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {props.conversations
+                .filter((c) => {
+                  if (c.id === mergeState.fromConv.id) return false;
+                  const q = mergeState.search.toLowerCase();
+                  if (!q) return true;
+                  const name = chatDisplayTitle(c.phone, c.name, c.order_phone).toLowerCase();
+                  return name.includes(q) || c.phone.includes(q);
+                })
+                .slice(0, 30)
+                .map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      if (!confirm(`¿Fusionar los mensajes de "${chatDisplayTitle(mergeState.fromConv.phone, mergeState.fromConv.name, mergeState.fromConv.order_phone)}" en "${chatDisplayTitle(c.phone, c.name, c.order_phone)}"? El primer chat quedará eliminado.`)) return;
+                      props.onMerge!(mergeState.fromConv.id, c.id);
+                      setMergeState(null);
+                    }}
+                    style={{
+                      width: "100%", textAlign: "left",
+                      padding: "10px 14px", fontSize: 13,
+                      color: "var(--text)", background: "transparent",
+                      borderBottom: "1px solid var(--border)"
+                    }}
+                  >
+                    <div style={{ fontWeight: 500 }}>{chatDisplayTitle(c.phone, c.name, c.order_phone)}</div>
+                    {c.name && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.name}</div>}
+                  </button>
+                ))}
+            </div>
+            <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+              <button
+                onClick={() => setMergeState(null)}
+                style={{ fontSize: 12, color: "var(--text-muted)", background: "transparent" }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </aside>

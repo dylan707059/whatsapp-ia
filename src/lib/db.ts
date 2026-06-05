@@ -966,6 +966,96 @@ export function deleteConversation(id: number): void {
   deleteConversationTx(id);
 }
 
+// ─── Fusión de conversación @lid → conv real ───────────────────────────────────
+// Busca convs @lid recientes del owner cuyo nombre coincida con el del pedido.
+const stmtRecentLidConvs = db.prepare<[string, number], Conversation>(`
+  SELECT c.*
+  FROM conversations c
+  WHERE c.owner_phone = ?
+    AND c.phone LIKE '%@lid'
+    AND c.created_at >= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.conversation_id = c.id AND o.source = 'SHOPIFY'
+    )
+  ORDER BY c.created_at DESC
+  LIMIT 20
+`);
+
+const stmtMoveMessages = db.prepare<[number, number]>(
+  "UPDATE messages SET conversation_id = ? WHERE conversation_id = ?"
+);
+const stmtMoveOutbox = db.prepare<[number, number]>(
+  "UPDATE outbox SET conversation_id = ? WHERE conversation_id = ? AND sent = 0"
+);
+const stmtMoveOrders = db.prepare<[number, number]>(
+  "UPDATE orders SET conversation_id = ? WHERE conversation_id = ?"
+);
+const stmtDelLidConv = db.prepare<[number]>("DELETE FROM conversations WHERE id = ?");
+
+const mergeConvTx = db.transaction((fromId: number, toId: number) => {
+  stmtMoveMessages.run(toId, fromId);
+  stmtMoveOutbox.run(toId, fromId);
+  stmtMoveOrders.run(toId, fromId);
+  stmtDelLidConv.run(fromId);
+});
+
+/**
+ * Mueve mensajes, outbox y pedidos de `fromId` a `toId` y borra `fromId`.
+ * Usado para fusionar una conv @lid huérfana con la conv de teléfono real
+ * creada por el webhook de Shopify.
+ */
+export function mergeConversationInto(fromId: number, toId: number): void {
+  mergeConvTx(fromId, toId);
+}
+
+/**
+ * Busca una conversación @lid reciente del owner cuyo nombre coincida con
+ * el nombre del pedido (mismo matching difuso que findRecentShopifyConversationByName).
+ * Se usa en el webhook para detectar si el cliente ya escribió antes de que
+ * llegara el webhook.
+ */
+export function findRecentLidConversationByName(
+  ownerPhone: string,
+  name: string,
+  withinSeconds = 7200
+): Conversation | undefined {
+  const since = Math.floor(Date.now() / 1000) - withinSeconds;
+  const candidates = stmtRecentLidConvs.all(ownerPhone, since);
+  if (candidates.length === 0) return undefined;
+
+  const target = (name || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!target) return undefined;
+  const targetFirst = target.split(" ")[0];
+
+  for (const c of candidates) {
+    const cn = (c.name || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9 ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cn) continue;
+    const cFirst = cn.split(" ")[0];
+    if (
+      cn === target ||
+      cFirst === targetFirst ||
+      cn.startsWith(target) ||
+      target.startsWith(cn)
+    ) return c;
+  }
+
+  return undefined;
+}
+
 // Confirmación de pedidos
 const stmtSetConfirmedAt     = db.prepare<[number]>("UPDATE conversations SET confirmed_at = unixepoch() WHERE id = ?");
 const stmtSetOwnerNotifiedAt = db.prepare<[number]>("UPDATE conversations SET owner_notified_at = unixepoch() WHERE id = ?");

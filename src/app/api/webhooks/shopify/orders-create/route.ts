@@ -8,7 +8,9 @@ import {
   getAccountSettingsByShopDomain,
   getAccountById,
   getAccountConnection,
-  isAccountAutomationPaused
+  isAccountAutomationPaused,
+  findRecentLidConversationByName,
+  mergeConversationInto
 } from "@/lib/db";
 import { upsertOrder, computeOrderHash, findOrderByHash } from "@/lib/orders";
 import { normalizePhone, phoneToJid } from "@/lib/phone-utils";
@@ -26,6 +28,7 @@ import {
   buildOfficeRejectionMessage
 } from "@/lib/colombia-zones";
 import { insertOrderEvent } from "@/lib/order-events";
+import { registerContact } from "@/lib/baileys/contact-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +85,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ─── 5. Crear/obtener conversación del cliente ────────────────────────────
   const customerJid = phoneToJid(parsed.rawPhone);
   const conv = getOrCreateConversation(customerJid, parsed.fullName, ownerPhone);
+
+  // Fusión inversa: si el cliente escribió antes de que llegara el webhook
+  // (ej: durante un deploy), puede que exista una conv @lid huérfana con el
+  // mismo nombre. La absorbemos aquí para evitar dos chats del mismo cliente.
+  try {
+    const lidConv = findRecentLidConversationByName(ownerPhone, parsed.fullName);
+    if (lidConv && lidConv.id !== conv.id) {
+      console.log(
+        `[shopify] Fusionando conv @lid #${lidConv.id} ("${lidConv.phone}") → ` +
+        `conv_shopify #${conv.id} para "${parsed.fullName}"`
+      );
+      mergeConversationInto(lidConv.id, conv.id);
+      registerContact(conv.phone, lidConv.phone);
+    }
+  } catch (err) {
+    console.error("[shopify] Error al fusionar conv @lid:", err);
+  }
 
   // Pasar a modo HUMAN para que la IA no responda automáticamente al cliente.
   // El owner puede toggle a AI manualmente desde el dashboard si quiere.

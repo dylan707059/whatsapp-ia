@@ -3,6 +3,7 @@ import {
   getOrCreateConversation,
   getConversationById,
   getConversationByPhone,
+
   insertMessage,
   insertMediaMessage,
   incrementUnread,
@@ -161,26 +162,46 @@ async function processMessage(
   }
 
   // ─── Deduplicación de conversación por LID ────────────────────────────────
-  // Si el mensaje llega con JID @lid (formato privacy de WhatsApp) y no tenemos
-  // mapping conocido, puede que ya exista una conversación creada por el
-  // webhook de Shopify con el phone real (@s.whatsapp.net). Buscamos por
-  // pushName matching en los últimos 30 min: si encontramos un pedido SHOPIFY
-  // pendiente con el mismo nombre, reusamos esa conversación y registramos
-  // el mapping LID → phone para los próximos mensajes.
+  // Si el mensaje llega con JID @lid, puede que ya exista la conv creada por
+  // Shopify con el teléfono real. Estrategia de matching en orden de fiabilidad:
+  //   1. Por teléfono: si el contact-store sabe que este @lid = teléfono X,
+  //      buscamos directamente la conv de ese teléfono. Es el match más fiable.
+  //   2. Por nombre: si no tenemos el teléfono, buscamos por nombre difuso en
+  //      las convs Shopify PENDING recientes. Menos fiable pero funciona para
+  //      clientes nuevos cuyo @lid aún no está en el contact-store.
   let convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
   if (jid.endsWith("@lid")) {
-    // Matching difuso por nombre (sin emojis/acentos) + fallback de candidato
-    // único. Antes exigía pushName exacto == nombre Shopify, lo que fallaba
-    // cuando el cliente tenía emojis en el nombre ("Sol🌼" vs "Sol").
-    const shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
-    if (shopifyConv && shopifyConv.id !== convo.id) {
-      console.log(
-        `[bot] LID ${jid} matchea con conv SHOPIFY #${shopifyConv.id} (${shopifyConv.phone}) ` +
-        `por nombre "${pushName ?? "(sin nombre)"}" — fusionando, descartando conv duplicada #${convo.id}`
-      );
-      // Registrar mapping para futuros mensajes
+    let shopifyConv: ReturnType<typeof getConversationByPhone> | ReturnType<typeof findRecentShopifyConversationByName> = undefined;
+
+    // 1. Match por teléfono (contact-store ya conoce el mapeo @lid → número)
+    const resolvedPhone = resolvePhone(jid);
+    const rawLid = jid.split("@")[0];
+    if (resolvedPhone && resolvedPhone !== rawLid) {
+      const phoneJid = resolvedPhone.includes("@") ? resolvedPhone : `${resolvedPhone}@s.whatsapp.net`;
+      const byPhone = getConversationByPhone(phoneJid, ownerPhone);
+      if (byPhone && byPhone.id !== convo.id) {
+        shopifyConv = byPhone;
+        console.log(
+          `[bot] LID ${jid} → teléfono ${resolvedPhone} (contact-store) — ` +
+          `fusionando con conv #${byPhone.id}`
+        );
+      }
+    }
+
+    // 2. Fallback: match por nombre cuando no hay mapeo de teléfono aún
+    if (!shopifyConv) {
+      shopifyConv = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
+      if (shopifyConv?.id === convo.id) shopifyConv = undefined;
+      if (shopifyConv) {
+        console.log(
+          `[bot] LID ${jid} matchea con conv SHOPIFY #${shopifyConv.id} (${shopifyConv.phone}) ` +
+          `por nombre "${pushName ?? "(sin nombre)"}" — fusionando, descartando conv duplicada #${convo.id}`
+        );
+      }
+    }
+
+    if (shopifyConv) {
       registerContact(shopifyConv.phone, jid);
-      // Borrar la conversación duplicada recién creada (todavía vacía)
       try {
         deleteConversation(convo.id);
       } catch (err) {

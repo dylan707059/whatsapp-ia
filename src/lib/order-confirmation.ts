@@ -87,6 +87,39 @@ const POSITIVE_KEYWORDS = [
 
 const POSITIVE_RE = new RegExp(`\\b(${POSITIVE_KEYWORDS.join("|")})\\b`);
 
+// ─── Tolerancia a errores de tipeo en "confirmado" ───────────────────────────
+// La gente escribe rápido y manda "corfimado", "comfirmado", "confirmd", etc.
+// Sin esto, esos typos NO se detectaban como confirmación y se "moría" el flujo.
+
+// Distancia de edición (Levenshtein), acotada para ser barata.
+function editDistance(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 3) return 99;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+const CONFIRM_ROOTS = ["confirmado", "confirmo", "confirmar", "confirma", "confirmacion", "confirmando"];
+
+// True si una palabra es "confirmado" mal escrito. Exige empezar con 'c' y
+// largo ≥6 para no confundir con palabras parecidas (ej: "informado").
+function looksLikeConfirmWord(word: string): boolean {
+  if (word.length < 6 || word[0] !== "c") return false;
+  for (const root of CONFIRM_ROOTS) {
+    const tol = root.length >= 9 ? 3 : 2;
+    if (editDistance(word, root) <= tol) return true;
+  }
+  return false;
+}
+
 /**
  * Devuelve true si el texto se interpreta como confirmación final de pedido.
  *
@@ -121,6 +154,12 @@ export function isConfirmationMessage(text: string): boolean {
   // 4) Heurística suelta para mensajes cortos con keyword positivo
   const words = norm.split(/\s+/);
   if (words.length <= 8 && POSITIVE_RE.test(norm)) {
+    return true;
+  }
+
+  // 5) Tolerancia a errores de tipeo de "confirmado" en mensajes cortos
+  //    (ej: "corfimado", "comfirmado", "confirmd"). Evita que un typo mate el flujo.
+  if (words.length <= 4 && words.some(looksLikeConfirmWord)) {
     return true;
   }
 

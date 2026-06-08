@@ -146,8 +146,20 @@ async function processMessage(
   const ownerPhones = getOwnerNotifyPhones(ownerPhone);
   const isOwner     = ownerPhones.includes(senderPhone);
 
+  // ─── Resolver LID → phone real antes de crear conversación ───────────────
+  // Si el JID es @lid y ya tenemos el mapping en contact-store, convertimos
+  // al JID real (@s.whatsapp.net) ANTES de tocar la base de datos.
+  // Esto evita crear conversaciones duplicadas cuando WhatsApp envía @lid.
+  let effectiveJid = jid;
   if (jid.endsWith("@lid") && !isOwner) {
-    console.log(`[handler] LID sin resolver: ${jid} → senderPhone=${senderPhone} | pushName=${msg.pushName} | ownerPhones=${ownerPhones.join(",")}`);
+    const lidKey = jid.split("@")[0];
+    if (senderPhone !== lidKey) {
+      // resolvePhone devolvió un número real distinto al lidKey → tenemos mapping
+      effectiveJid = `${senderPhone}@s.whatsapp.net`;
+      console.log(`[handler] LID ${jid} resuelto a ${effectiveJid} desde contact-store`);
+    } else {
+      console.log(`[handler] LID sin resolver: ${jid} → pushName=${msg.pushName} | ownerPhones=${ownerPhones.join(",")}`);
+    }
   }
 
   // ─── Multimedia entrante + texto ──────────────────────────────────────────
@@ -181,35 +193,39 @@ async function processMessage(
   }
 
   // ─── Bloqueo de cliente ───────────────────────────────────────────────────
-  if (isClientBlocked(jid)) {
-    console.log(`[bot] Cliente bloqueado ${jid}, ignorando mensaje`);
+  if (isClientBlocked(effectiveJid)) {
+    console.log(`[bot] Cliente bloqueado ${effectiveJid}, ignorando mensaje`);
     return;
   }
 
+  // ─── Crear/obtener conversación ─────────────────────────────────────────────
+  // Si el LID ya estaba resuelto (effectiveJid = @s.whatsapp.net), caemos
+  // directamente en la conv correcta sin crear duplicado.
+  // Si sigue siendo @lid, creamos conv temporal y luego deduplicamos.
+  let convo = getOrCreateConversation(effectiveJid, pushName ?? null, ownerPhone);
+
   // ─── Deduplicación de conversación por LID ────────────────────────────────
-  // Si el mensaje llega con JID @lid, puede que ya exista la conv creada por
-  // Shopify con el teléfono real. Estrategia en orden de fiabilidad:
+  // Solo se activa cuando effectiveJid sigue siendo @lid (sin mapping previo).
+  // Estrategias en orden de fiabilidad:
   //   1. Contact-store: WhatsApp ya nos dijo que @lid X = teléfono Y → match directo.
   //   2. Teléfono en el mensaje: Releasit manda mensajes con "📱 Teléfono: +57..."
-  //      Extraemos ese número y buscamos la conv de Shopify por JID.
-  //   3. Nombre difuso: si no hay teléfono en el texto, buscamos por nombre.
-  let convo = getOrCreateConversation(jid, pushName ?? null, ownerPhone);
-  if (jid.endsWith("@lid")) {
+  //   3. Nombre difuso: búsqueda en convs Shopify activas de los últimos 7 días.
+  if (effectiveJid.endsWith("@lid")) {
     let shopifyConv: Conversation | undefined;
 
-    // 1. Match por contact-store (mapeo persistido @lid → número real)
-    const resolvedPhone = resolvePhone(jid);
-    const rawLid = jid.split("@")[0];
-    if (resolvedPhone && resolvedPhone !== rawLid) {
-      const phoneJid = resolvedPhone.includes("@") ? resolvedPhone : `${resolvedPhone}@s.whatsapp.net`;
-      const byPhone = getConversationByPhone(phoneJid, ownerPhone);
+    // 1. Contact-store (puede haberse registrado entre la resolución inicial y aquí)
+    const resolvedPhone2 = resolvePhone(effectiveJid);
+    const rawLid2 = effectiveJid.split("@")[0];
+    if (resolvedPhone2 && resolvedPhone2 !== rawLid2) {
+      const phoneJid2 = resolvedPhone2.includes("@") ? resolvedPhone2 : `${resolvedPhone2}@s.whatsapp.net`;
+      const byPhone = getConversationByPhone(phoneJid2, ownerPhone);
       if (byPhone && byPhone.id !== convo.id) {
         shopifyConv = byPhone;
-        console.log(`[bot] LID ${jid} → ${resolvedPhone} (contact-store) — conv #${byPhone.id}`);
+        console.log(`[bot] LID ${jid} → ${resolvedPhone2} (contact-store) — conv #${byPhone.id}`);
       }
     }
 
-    // 2. Teléfono extraído del texto del mensaje (ej: mensaje de checkout de Releasit)
+    // 2. Teléfono extraído del texto (ej: mensaje de checkout de Releasit/Dropify)
     if (!shopifyConv && text?.trim()) {
       const extracted = extractColombianPhone(text);
       if (extracted) {
@@ -217,17 +233,17 @@ async function processMessage(
         const byExtracted = getConversationByPhone(extractedJid, ownerPhone);
         if (byExtracted && byExtracted.id !== convo.id) {
           shopifyConv = byExtracted;
-          console.log(`[bot] LID ${jid}: teléfono extraído del mensaje "${extracted}" → conv #${byExtracted.id}`);
+          console.log(`[bot] LID ${jid}: teléfono extraído "${extracted}" → conv #${byExtracted.id}`);
         }
       }
     }
 
-    // 3. Fallback: nombre difuso en convs Shopify PENDING recientes
-    if (!shopifyConv) {
-      const byName = findRecentShopifyConversationByName(ownerPhone, pushName ?? "");
+    // 3. Nombre difuso en convs Shopify activas (últimos 7 días)
+    if (!shopifyConv && pushName) {
+      const byName = findRecentShopifyConversationByName(ownerPhone, pushName);
       if (byName && byName.id !== convo.id) {
         shopifyConv = byName;
-        console.log(`[bot] LID ${jid}: nombre "${pushName ?? ""}" → conv #${byName.id}`);
+        console.log(`[bot] LID ${jid}: nombre "${pushName}" → conv #${byName.id}`);
       }
     }
 
@@ -283,7 +299,7 @@ async function processMessage(
   // "por favor confirma tu pedido" 3 min después sería muy mala UX.
   if (isComplaintMessage(text)) {
     discardPendingOutboxForConversation(convo.id);
-    await handleComplaint(sock, jid, convo.id, senderPhone, text, ownerPhone);
+    await handleComplaint(sock, convo.phone, convo.id, senderPhone, text, ownerPhone);
     return;
   }
 
@@ -305,7 +321,7 @@ async function processMessage(
   // el cliente recibiría dos mensajes del bot (el template + la confirmación).
   if (isConfirmationMessage(text)) {
     const snapId     = convo.id;
-    const snapJid    = jid;
+    const snapJid    = convo.phone; // usar el JID real de la conv, no el LID
     const snapMode   = fresh.mode;
     const snapPhone  = senderPhone;
 
@@ -365,8 +381,8 @@ async function processMessage(
   }
 
   insertMessage(convo.id, "assistant", reply);
-  await botSend(sock, jid, reply);
-  console.log(`[bot] → Enviado a ${jid}`);
+  await botSend(sock, convo.phone, reply);
+  console.log(`[bot] → Enviado a ${convo.phone}`);
 
   // Nota: la auto-extracción de pedido a partir del texto de la IA fue
   // desactivada. Los pedidos ahora se crean SOLO desde el webhook de Shopify

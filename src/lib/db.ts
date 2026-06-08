@@ -884,7 +884,7 @@ const stmtRecentShopifyConvs = db.prepare<
       SELECT 1 FROM orders o
       WHERE o.conversation_id = c.id
         AND o.source = 'SHOPIFY'
-        AND o.status = 'PENDING_CONFIRMATION'
+        AND o.status NOT IN ('CANCELLED')
     )
   ORDER BY c.created_at DESC
   LIMIT 20
@@ -913,7 +913,7 @@ function normalizeName(raw: string): string {
 export function findRecentShopifyConversationByName(
   ownerPhone: string,
   name: string,
-  withinSeconds = 1800
+  withinSeconds = 604800
 ): Conversation | undefined {
   const since = Math.floor(Date.now() / 1000) - withinSeconds;
   const candidates = stmtRecentShopifyConvs.all(ownerPhone, since);

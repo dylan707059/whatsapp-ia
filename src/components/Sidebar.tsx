@@ -46,7 +46,7 @@ export default function Sidebar(props: Props) {
       .then((d) => setLabels(d.labels ?? []))
       .catch(() => {});
     const t = setInterval(() => {
-      fetch("/api/labels")
+      fetch(`/api/wa-labels?t=${Date.now()}`, { cache: "no-store" })
         .then((r) => r.json() as Promise<{ labels: Label[] }>)
         .then((d) => setLabels(d.labels ?? []))
         .catch(() => {});

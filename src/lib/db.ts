@@ -1597,6 +1597,22 @@ const stmtAllWaAssoc = db.prepare<
 const stmtConvIdByJid = db.prepare<[string], { id: number; phone: string }>(
   "SELECT id, phone FROM conversations WHERE owner_phone = ?"
 );
+const stmtAllContactLids = db.prepare<[], { lid: string; phone: string }>(
+  "SELECT lid, phone FROM contact_lids"
+);
+const stmtLidByPhone = db.prepare<[string], { lid: string }>(
+  "SELECT lid FROM contact_lids WHERE phone = ? LIMIT 1"
+);
+
+/** Devuelve el JID que WhatsApp reconoce para un chat: si la conversación quedó
+ *  como número real (@s.whatsapp.net) pero conocemos su @lid, devolvemos el @lid
+ *  (que es como WhatsApp identifica el chat para etiquetas). Si no, el original. */
+export function preferLidJid(jid: string): string {
+  if (!jid || jid.endsWith("@lid")) return jid;
+  const phone = jid.split("@")[0];
+  const row = stmtLidByPhone.get(phone);
+  return row ? `${row.lid}@lid` : jid;
+}
 
 export function setWaLabelAssoc(ownerPhone: string, labelId: string, chatJid: string): void {
   if (!ownerPhone || !labelId || !chatJid) return;
@@ -1607,7 +1623,23 @@ export function removeWaLabelAssoc(ownerPhone: string, labelId: string, chatJid:
   stmtRemoveWaAssoc.run(ownerPhone, labelId, chatJid);
 }
 export function listWaLabelIdsForChat(ownerPhone: string, chatJid: string): string[] {
-  return stmtWaAssocForChat.all(ownerPhone, chatJid).map((r) => r.label_id);
+  // Match por clave normalizada (resuelve @lid ↔ teléfono) igual que la lista.
+  const lidToPhone = new Map<string, string>();
+  for (const r of stmtAllContactLids.all()) lidToPhone.set(r.lid, r.phone);
+  const keyOf = (jid: string): string => {
+    if (jid.endsWith("@lid")) {
+      const lid = jid.split("@")[0];
+      const phone = lidToPhone.get(lid);
+      return phone ? `p:${phone}` : `lid:${lid}`;
+    }
+    return `p:${jid.split("@")[0]}`;
+  };
+  const target = keyOf(chatJid);
+  const ids: string[] = [];
+  for (const row of stmtAllWaAssoc.all(ownerPhone)) {
+    if (keyOf(row.chat_jid) === target) ids.push(row.label_id);
+  }
+  return ids;
 }
 
 // ─── Cola de operaciones de etiqueta (panel → WhatsApp) ───────────────────────
@@ -1649,12 +1681,27 @@ export function getAllWaLabelsByConversation(
   const map = new Map<number, Array<{ id: string; name: string; color: string }>>();
   if (!ownerPhone) return map;
 
-  // chat_jid (de la asociación) → conversation.id
-  const convByJid = new Map<string, number>();
-  for (const c of stmtConvIdByJid.all(ownerPhone)) convByJid.set(c.phone, c.id);
+  // Mapa lid → teléfono real (para resolver @lid a número).
+  const lidToPhone = new Map<string, string>();
+  for (const r of stmtAllContactLids.all()) lidToPhone.set(r.lid, r.phone);
+
+  // Clave normalizada de un JID: usa el número real cuando se puede resolver,
+  // así matchea tanto si el chat quedó como @lid o como @s.whatsapp.net.
+  const keyOf = (jid: string): string => {
+    if (jid.endsWith("@lid")) {
+      const lid = jid.split("@")[0];
+      const phone = lidToPhone.get(lid);
+      return phone ? `p:${phone}` : `lid:${lid}`;
+    }
+    return `p:${jid.split("@")[0]}`;
+  };
+
+  // clave normalizada → conversation.id
+  const convByKey = new Map<string, number>();
+  for (const c of stmtConvIdByJid.all(ownerPhone)) convByKey.set(keyOf(c.phone), c.id);
 
   for (const row of stmtAllWaAssoc.all(ownerPhone)) {
-    const convId = convByJid.get(row.chat_jid);
+    const convId = convByKey.get(keyOf(row.chat_jid));
     if (convId == null) continue;
     const list = map.get(convId) ?? [];
     list.push({ id: row.label_id, name: row.name ?? "Etiqueta", color: waLabelColorHex(row.color) });

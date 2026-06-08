@@ -4,7 +4,8 @@ import {
   getWaLabelById,
   setWaLabelAssoc,
   removeWaLabelAssoc,
-  enqueueWaLabelOp
+  enqueueWaLabelOp,
+  preferLidJid
 } from "@/lib/db";
 import { requireOwnedConversation } from "@/lib/request-account";
 
@@ -48,8 +49,9 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "Etiqueta no encontrada" }, { status: 404 });
   }
 
-  setWaLabelAssoc(conv.owner_phone, labelId, conv.phone);          // reflejo inmediato en el panel
-  enqueueWaLabelOp(conv.owner_phone, conv.phone, labelId, "add");  // el bot la aplica en WhatsApp
+  const waJid = preferLidJid(conv.phone);                       // JID que WhatsApp reconoce
+  setWaLabelAssoc(conv.owner_phone, labelId, waJid);            // reflejo inmediato en el panel
+  enqueueWaLabelOp(conv.owner_phone, waJid, labelId, "add");    // el bot la aplica en WhatsApp
   return NextResponse.json({ ok: true });
 }
 
@@ -65,7 +67,8 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const labelId = req.nextUrl.searchParams.get("labelId") ?? "";
   if (!labelId) return NextResponse.json({ error: "labelId requerido" }, { status: 400 });
 
-  removeWaLabelAssoc(conv.owner_phone, labelId, conv.phone);
-  enqueueWaLabelOp(conv.owner_phone, conv.phone, labelId, "remove");
+  const waJid = preferLidJid(conv.phone);
+  removeWaLabelAssoc(conv.owner_phone, labelId, waJid);
+  enqueueWaLabelOp(conv.owner_phone, waJid, labelId, "remove");
   return NextResponse.json({ ok: true });
 }

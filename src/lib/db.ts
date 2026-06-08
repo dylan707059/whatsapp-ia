@@ -1085,6 +1085,28 @@ export function findRecentLidConversationByName(
   return undefined;
 }
 
+// Lista los chats @lid huérfanos (sin pedido Shopify) del owner, recientes.
+// Se usa en la barrida periódica de fusión para limpiar duplicados que se
+// crearon por temas de tiempo (cliente respondió por @lid antes/después del
+// webhook, o el nombre no coincidió en ese instante).
+const stmtListOrphanLid = db.prepare<[string, number], Conversation>(`
+  SELECT c.*
+  FROM conversations c
+  WHERE c.owner_phone = ?
+    AND c.phone LIKE '%@lid'
+    AND c.created_at >= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.conversation_id = c.id AND o.source = 'SHOPIFY'
+    )
+  ORDER BY c.created_at DESC
+  LIMIT 100
+`);
+export function listOrphanLidConversations(ownerPhone: string, withinSeconds = 604800): Conversation[] {
+  if (!ownerPhone) return [];
+  return stmtListOrphanLid.all(ownerPhone, Math.floor(Date.now() / 1000) - withinSeconds);
+}
+
 // Confirmación de pedidos
 const stmtSetConfirmedAt     = db.prepare<[number]>("UPDATE conversations SET confirmed_at = unixepoch() WHERE id = ?");
 const stmtSetOwnerNotifiedAt = db.prepare<[number]>("UPDATE conversations SET owner_notified_at = unixepoch() WHERE id = ?");

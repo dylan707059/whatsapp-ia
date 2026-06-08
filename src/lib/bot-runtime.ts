@@ -7,7 +7,8 @@ import {
   listAllAccounts, getAccountConnection, getConversationById,
   isAccountAutomationPaused, getAppState, setAppState, getAccountById,
   findRecentLidConversationByName, mergeConversationInto,
-  getPendingWaLabelOps, markWaLabelOpDone
+  getPendingWaLabelOps, markWaLabelOpDone,
+  listOrphanLidConversations, findRecentShopifyConversationByName
 } from "./db";
 import { registerContact } from "./baileys/contact-store";
 import {
@@ -366,6 +367,42 @@ export function startBotRuntime(): void {
       }
     }
   }, REMINDER_CHECK_MS);
+
+  // ─── Barrida de fusión de chats duplicados @lid (cada 60s) ──────────────────
+  // Limpia duplicados que se crearon por temas de tiempo: busca chats @lid
+  // huérfanos (sin pedido Shopify) y los fusiona con el chat real del mismo
+  // cliente (por nombre + pedido Shopify). Así, aunque un chat se duplique,
+  // se une solo en ~1 minuto.
+  const normName = (s: string | null) => (s || "")
+    .toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+
+  setInterval(() => {
+    for (const acc of listAllAccounts()) {
+      const conn = getAccountConnection(acc.id);
+      if (conn.status !== "connected" || !conn.phone) continue;
+      const owner = conn.phone;
+      try {
+        for (const orphan of listOrphanLidConversations(owner)) {
+          if (!orphan.name) continue;
+          const real = findRecentShopifyConversationByName(owner, orphan.name);
+          if (!real || real.id === orphan.id || real.phone.endsWith("@lid")) continue;
+          // Seguridad anti-fusión-errónea: exigir nombre completo idéntico
+          // (no solo primer nombre) para no unir a dos personas distintas.
+          const a = normName(orphan.name), b = normName(real.name);
+          if (!a || a !== b) continue;
+          console.log(
+            `[bot] Fusión periódica: chat @lid #${orphan.id} ("${orphan.name}") → ` +
+            `chat real #${real.id} (${real.phone})`
+          );
+          mergeConversationInto(orphan.id, real.id);
+          registerContact(real.phone, orphan.phone);
+        }
+      } catch (err) {
+        console.error(`[bot] Error en barrida de fusión (acc ${acc.id}):`, err);
+      }
+    }
+  }, 60000);
 
   // ─── Watcher de reinicio por cuenta ─────────────────────────────────────────
   setInterval(async () => {

@@ -18,7 +18,8 @@ import {
   deleteConversation,
   isAutomationPausedForPhone,
   findWaLabelIdByName,
-  listWaLabels
+  listWaLabels,
+  setWaLabelAssoc
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
@@ -527,6 +528,8 @@ async function applyNuevoPedidoLabel(sock: WASocket, convPhoneJid: string): Prom
   }
 
   await anySock.addChatLabel(jid, labelId);
+  // Reflejar la asociación en el panel de inmediato (sin esperar el eco del evento).
+  try { setWaLabelAssoc(ownerPhone, labelId, jid); } catch {}
   console.log(`[bot] [label] ✅ Etiqueta "${LABEL_TARGET}" (id=${labelId}) aplicada a ${jid}`);
 }
 

@@ -250,6 +250,35 @@ db.exec(`
     PRIMARY KEY (owner_phone, label_id)
   );
 
+  -- Asociación etiqueta WA ↔ chat (qué etiqueta tiene cada chat). Se llena con
+  -- el evento labels.association de WhatsApp (celular → panel) y cuando el panel
+  -- pone/quita una etiqueta (panel → WhatsApp). chat_jid = JID del cliente.
+  CREATE TABLE IF NOT EXISTS wa_label_assoc (
+    owner_phone TEXT NOT NULL,
+    label_id    TEXT NOT NULL,
+    chat_jid    TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (owner_phone, label_id, chat_jid)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_wa_label_assoc_chat ON wa_label_assoc(owner_phone, chat_jid);
+
+  -- Cola de operaciones de etiqueta del panel hacia WhatsApp (panel → celular).
+  -- La ruta API encola aquí; el bot (mismo proceso que el socket) las ejecuta
+  -- llamando addChatLabel/removeChatLabel. Evita que la API toque el socket
+  -- directamente (que podría estar en otra instancia de módulo).
+  CREATE TABLE IF NOT EXISTS wa_label_ops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_phone TEXT NOT NULL,
+    chat_jid    TEXT NOT NULL,
+    label_id    TEXT NOT NULL,
+    op          TEXT NOT NULL,
+    processed   INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_wa_label_ops_pending ON wa_label_ops(processed, created_at);
+
   -- ─── Multi-cuenta (login) ───────────────────────────────────────────────────
   -- Cada cuenta es un negocio distinto. Los datos del sistema se asocian al
   -- negocio via owner_phone (el numero de WhatsApp conectado de esa cuenta).
@@ -1505,6 +1534,133 @@ export function upsertWaLabel(ownerPhone: string, label: {
 
 export function listWaLabels(ownerPhone: string): WaLabel[] {
   return stmtListWaLabels.all(ownerPhone);
+}
+
+export function getWaLabelById(ownerPhone: string, labelId: string): WaLabel | undefined {
+  return listWaLabels(ownerPhone).find((l) => l.label_id === labelId);
+}
+
+// ─── Paleta de colores de etiquetas de WhatsApp Business ──────────────────────
+// WhatsApp guarda el color como un índice entero. Lo mapeamos a un hex parecido
+// para mostrarlo en el panel. Si el índice se sale del rango, usamos módulo.
+const WA_LABEL_COLORS = [
+  "#94a3b8", // 0  gris (default)
+  "#ef9a9a", // 1  rojo claro
+  "#f48fb1", // 2  rosa
+  "#ce93d8", // 3  morado
+  "#b39ddb", // 4  violeta
+  "#9fa8da", // 5  índigo
+  "#90caf9", // 6  azul
+  "#81d4fa", // 7  celeste
+  "#80deea", // 8  cian
+  "#80cbc4", // 9  teal
+  "#a5d6a7", // 10 verde
+  "#c5e1a5", // 11 verde lima
+  "#e6ee9c", // 12 lima
+  "#fff59d", // 13 amarillo
+  "#ffe082", // 14 ámbar
+  "#ffcc80", // 15 naranja
+  "#ffab91", // 16 naranja oscuro
+  "#bcaaa4", // 17 marrón
+  "#b0bec5", // 18 azul gris
+  "#f8bbd0"  // 19 rosa claro
+];
+
+/** Convierte el índice de color de una etiqueta WA a un hex para el panel. */
+export function waLabelColorHex(color: number | null): string {
+  if (color == null || !Number.isFinite(color)) return WA_LABEL_COLORS[0];
+  const idx = ((Math.trunc(color) % WA_LABEL_COLORS.length) + WA_LABEL_COLORS.length) % WA_LABEL_COLORS.length;
+  return WA_LABEL_COLORS[idx];
+}
+
+// ─── Asociaciones etiqueta WA ↔ chat ──────────────────────────────────────────
+const stmtSetWaAssoc = db.prepare<[string, string, string]>(
+  `INSERT INTO wa_label_assoc (owner_phone, label_id, chat_jid, updated_at)
+   VALUES (?, ?, ?, unixepoch())
+   ON CONFLICT(owner_phone, label_id, chat_jid) DO UPDATE SET updated_at = unixepoch()`
+);
+const stmtRemoveWaAssoc = db.prepare<[string, string, string]>(
+  "DELETE FROM wa_label_assoc WHERE owner_phone = ? AND label_id = ? AND chat_jid = ?"
+);
+const stmtWaAssocForChat = db.prepare<[string, string], { label_id: string }>(
+  "SELECT label_id FROM wa_label_assoc WHERE owner_phone = ? AND chat_jid = ?"
+);
+const stmtAllWaAssoc = db.prepare<
+  [string],
+  { chat_jid: string; label_id: string; name: string | null; color: number | null }
+>(`
+  SELECT a.chat_jid, a.label_id, l.name, l.color
+  FROM wa_label_assoc a
+  JOIN wa_labels l ON l.owner_phone = a.owner_phone AND l.label_id = a.label_id
+  WHERE a.owner_phone = ? AND l.deleted = 0
+`);
+const stmtConvIdByJid = db.prepare<[string], { id: number; phone: string }>(
+  "SELECT id, phone FROM conversations WHERE owner_phone = ?"
+);
+
+export function setWaLabelAssoc(ownerPhone: string, labelId: string, chatJid: string): void {
+  if (!ownerPhone || !labelId || !chatJid) return;
+  stmtSetWaAssoc.run(ownerPhone, labelId, chatJid);
+}
+export function removeWaLabelAssoc(ownerPhone: string, labelId: string, chatJid: string): void {
+  if (!ownerPhone || !labelId || !chatJid) return;
+  stmtRemoveWaAssoc.run(ownerPhone, labelId, chatJid);
+}
+export function listWaLabelIdsForChat(ownerPhone: string, chatJid: string): string[] {
+  return stmtWaAssocForChat.all(ownerPhone, chatJid).map((r) => r.label_id);
+}
+
+// ─── Cola de operaciones de etiqueta (panel → WhatsApp) ───────────────────────
+export interface WaLabelOp {
+  id: number;
+  owner_phone: string;
+  chat_jid: string;
+  label_id: string;
+  op: string; // 'add' | 'remove'
+  processed: number;
+  created_at: number;
+}
+const stmtEnqueueWaOp = db.prepare<[string, string, string, string]>(
+  "INSERT INTO wa_label_ops (owner_phone, chat_jid, label_id, op) VALUES (?, ?, ?, ?)"
+);
+const stmtPendingWaOps = db.prepare<[string, number], WaLabelOp>(
+  "SELECT * FROM wa_label_ops WHERE processed = 0 AND owner_phone = ? ORDER BY created_at ASC LIMIT ?"
+);
+const stmtMarkWaOpDone = db.prepare<[number]>(
+  "UPDATE wa_label_ops SET processed = 1 WHERE id = ?"
+);
+
+export function enqueueWaLabelOp(ownerPhone: string, chatJid: string, labelId: string, op: "add" | "remove"): void {
+  if (!ownerPhone || !chatJid || !labelId) return;
+  stmtEnqueueWaOp.run(ownerPhone, chatJid, labelId, op);
+}
+export function getPendingWaLabelOps(ownerPhone: string, limit = 20): WaLabelOp[] {
+  return stmtPendingWaOps.all(ownerPhone, limit);
+}
+export function markWaLabelOpDone(id: number): void {
+  stmtMarkWaOpDone.run(id);
+}
+
+/** Mapa conversationId → etiquetas WA (id/name/color) para enriquecer la lista
+ *  de chats sin N+1 queries. Une la asociación con la conversación por su JID. */
+export function getAllWaLabelsByConversation(
+  ownerPhone: string
+): Map<number, Array<{ id: string; name: string; color: string }>> {
+  const map = new Map<number, Array<{ id: string; name: string; color: string }>>();
+  if (!ownerPhone) return map;
+
+  // chat_jid (de la asociación) → conversation.id
+  const convByJid = new Map<string, number>();
+  for (const c of stmtConvIdByJid.all(ownerPhone)) convByJid.set(c.phone, c.id);
+
+  for (const row of stmtAllWaAssoc.all(ownerPhone)) {
+    const convId = convByJid.get(row.chat_jid);
+    if (convId == null) continue;
+    const list = map.get(convId) ?? [];
+    list.push({ id: row.label_id, name: row.name ?? "Etiqueta", color: waLabelColorHex(row.color) });
+    map.set(convId, list);
+  }
+  return map;
 }
 
 // Normaliza para comparar nombres de etiqueta (sin acentos/emojis/case).

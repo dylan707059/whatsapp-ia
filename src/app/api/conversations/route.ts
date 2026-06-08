@@ -3,7 +3,7 @@ import {
   listConversations,
   listArchivedConversations,
   countArchivedConversations,
-  getAllConversationLabels
+  getAllWaLabelsByConversation
 } from "@/lib/db";
 import { ownerPhoneFromRequest } from "@/lib/request-account";
 
@@ -21,13 +21,11 @@ export async function GET(req: NextRequest) {
 
   const archivedCount = countArchivedConversations(ownerPhone);
 
-  // Enriquecer cada conv con sus labels (lite, solo id/name/color)
-  const labelsByConv = getAllConversationLabels(ownerPhone);
+  // Enriquecer cada conv con sus etiquetas de WhatsApp Business (id/name/color).
+  const labelsByConv = getAllWaLabelsByConversation(ownerPhone);
   const enriched = conversations.map((c) => ({
     ...c,
-    labels: (labelsByConv.get(c.id) ?? []).map((l) => ({
-      id: l.id, name: l.name, color: l.color
-    }))
+    labels: labelsByConv.get(c.id) ?? []
   }));
 
   return NextResponse.json({

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import ThemeToggle from "./ThemeToggle";
 
 interface Label {
-  id: number;
+  id: string;
   name: string;
   color: string;
 }
@@ -24,8 +24,8 @@ interface Props {
   onOpenAccounts?: () => void;
   onOpenPedidos?: () => void;
   onLogout?: () => void;
-  onLabelFilter?: (labelId: number | null) => void;
-  activeLabelFilter?: number | null;
+  onLabelFilter?: (labelId: string | null) => void;
+  activeLabelFilter?: string | null;
 }
 
 export default function Sidebar(props: Props) {
@@ -41,7 +41,7 @@ export default function Sidebar(props: Props) {
   }, []);
 
   useEffect(() => {
-    fetch("/api/labels")
+    fetch("/api/wa-labels")
       .then((r) => r.json() as Promise<{ labels: Label[] }>)
       .then((d) => setLabels(d.labels ?? []))
       .catch(() => {});
@@ -205,7 +205,7 @@ export default function Sidebar(props: Props) {
           />
         ))}
         <div style={{ padding: "4px 12px", fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
-          Creá etiquetas desde cualquier chat
+          Se crean en WhatsApp Business
         </div>
       </div>
 

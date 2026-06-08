@@ -6,7 +6,8 @@ import {
   setMessageWaId, getPendingRevokes, markRevokeDone,
   listAllAccounts, getAccountConnection, getConversationById,
   isAccountAutomationPaused, getAppState, setAppState, getAccountById,
-  findRecentLidConversationByName, mergeConversationInto
+  findRecentLidConversationByName, mergeConversationInto,
+  getPendingWaLabelOps, markWaLabelOpDone
 } from "./db";
 import { registerContact } from "./baileys/contact-store";
 import {
@@ -229,6 +230,26 @@ export function startBotRuntime(): void {
         } catch (err) {
           console.error(`[bot] (acc ${h.accountId}) Error enviando outbox #${item.id}, revirtiendo:`, err);
           try { unclaimOutboxItem(item.id); } catch {}
+        }
+      }
+
+      // ─── Operaciones de etiqueta encoladas por el panel (panel → WhatsApp) ──
+      for (const op of getPendingWaLabelOps(conn.phone, 20)) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sock = h.sock as any;
+          const fn = op.op === "remove" ? sock.removeChatLabel : sock.addChatLabel;
+          if (typeof fn !== "function") {
+            console.warn(`[bot] addChatLabel/removeChatLabel no disponible — op #${op.id} descartada`);
+            markWaLabelOpDone(op.id);
+            continue;
+          }
+          await fn.call(sock, op.chat_jid, op.label_id);
+          markWaLabelOpDone(op.id);
+          console.log(`[bot] (acc ${h.accountId}) Etiqueta ${op.label_id} ${op.op === "remove" ? "quitada de" : "puesta a"} ${op.chat_jid} (desde panel)`);
+        } catch (err) {
+          console.error(`[bot] Error aplicando op de etiqueta #${op.id}:`, err);
+          markWaLabelOpDone(op.id); // no reintentar para no trabar la cola
         }
       }
     }

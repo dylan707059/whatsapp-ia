@@ -26,7 +26,7 @@ export default function ConnectionGate() {
   const selectedIdRef                     = useRef<number | null>(null);
   selectedIdRef.current = selectedId;
   const [search, setSearch]               = useState<string>("");
-  const [labelFilter, setLabelFilter]     = useState<number | null>(null);
+  const [labelFilter, setLabelFilter]     = useState<string | null>(null);
   // Pantalla de configuración: se abre con el botón ⚙️ del menú lateral.
   const [showSettings, setShowSettings]   = useState<boolean>(false);
   const [showAccounts, setShowAccounts]   = useState<boolean>(false);

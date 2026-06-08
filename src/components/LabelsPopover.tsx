@@ -1,39 +1,35 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { LabelLite } from "@/lib/types";
 
 interface Props {
   conversationId: number;
   onClose: () => void;
 }
 
-interface Label extends LabelLite {
-  owner_phone: string;
-  created_at: number;
+interface WaLabel {
+  id: string;
+  name: string;
+  color: string;
 }
 
-const PALETTE = [
-  "#5e6ad2", "#46d39a", "#ffb547", "#f472b6", "#60a5fa",
-  "#f87171", "#a78bfa", "#34d399", "#fb923c", "#94a3b8"
-];
-
 export default function LabelsPopover({ conversationId, onClose }: Props) {
-  const [allLabels, setAllLabels]     = useState<Label[]>([]);
-  const [assignedIds, setAssignedIds] = useState<Set<number>>(new Set());
-  const [creating, setCreating]       = useState(false);
-  const [newName, setNewName]         = useState("");
-  const [newColor, setNewColor]       = useState(PALETTE[0]);
+  const [allLabels, setAllLabels]     = useState<WaLabel[]>([]);
+  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading]         = useState(true);
+  const [busyId, setBusyId]           = useState<string | null>(null);
+  const [error, setError]             = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/labels").then((r) => r.json() as Promise<{ labels: Label[] }>),
-      fetch(`/api/conversations/${conversationId}/labels`).then((r) => r.json() as Promise<{ labels: Label[] }>)
+      fetch("/api/wa-labels").then((r) => r.json() as Promise<{ labels: WaLabel[] }>),
+      fetch(`/api/conversations/${conversationId}/wa-labels`).then((r) => r.json() as Promise<{ labelIds: string[] }>)
     ]).then(([all, assigned]) => {
       setAllLabels(all.labels ?? []);
-      setAssignedIds(new Set((assigned.labels ?? []).map((l) => l.id)));
-    });
+      setAssignedIds(new Set(assigned.labelIds ?? []));
+    }).catch(() => setError("No se pudieron cargar las etiquetas"))
+      .finally(() => setLoading(false));
   }, [conversationId]);
 
   useEffect(() => {
@@ -44,52 +40,30 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
-  async function toggleAssign(labelId: number, isAssigned: boolean) {
-    const next = new Set(assignedIds);
-    if (isAssigned) {
-      await fetch(`/api/conversations/${conversationId}/labels?labelId=${labelId}`, { method: "DELETE" });
-      next.delete(labelId);
-    } else {
-      await fetch(`/api/conversations/${conversationId}/labels`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ labelId })
-      });
-      next.add(labelId);
+  async function toggleAssign(labelId: string, isAssigned: boolean) {
+    setBusyId(labelId);
+    setError(null);
+    try {
+      const res = isAssigned
+        ? await fetch(`/api/conversations/${conversationId}/wa-labels?labelId=${encodeURIComponent(labelId)}`, { method: "DELETE" })
+        : await fetch(`/api/conversations/${conversationId}/wa-labels`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ labelId })
+          });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setError(res.status === 409 ? "WhatsApp no está conectado" : (data.error ?? "Error al sincronizar"));
+        return;
+      }
+      const next = new Set(assignedIds);
+      if (isAssigned) next.delete(labelId); else next.add(labelId);
+      setAssignedIds(next);
+    } catch {
+      setError("Error de conexión");
+    } finally {
+      setBusyId(null);
     }
-    setAssignedIds(next);
-  }
-
-  async function handleCreate() {
-    const name = newName.trim();
-    if (!name) return;
-    const res = await fetch("/api/labels", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, color: newColor })
-    });
-    if (!res.ok) return;
-    const data = await res.json() as { label: Label };
-    setAllLabels((prev) => [...prev, data.label]);
-    await fetch(`/api/conversations/${conversationId}/labels`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ labelId: data.label.id })
-    });
-    setAssignedIds((prev) => new Set(prev).add(data.label.id));
-    setNewName("");
-    setCreating(false);
-  }
-
-  async function handleDeleteLabel(labelId: number) {
-    if (!confirm("¿Borrar esta etiqueta? Se quitará de TODAS las conversaciones.")) return;
-    await fetch(`/api/labels/${labelId}`, { method: "DELETE" });
-    setAllLabels((prev) => prev.filter((l) => l.id !== labelId));
-    setAssignedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(labelId);
-      return next;
-    });
   }
 
   return (
@@ -120,156 +94,78 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
           padding: "0 4px"
         }}
       >
-        Etiquetas
+        Etiquetas de WhatsApp
       </div>
 
-      <div style={{ maxHeight: 220, overflowY: "auto" }}>
-        {allLabels.length === 0 && !creating && (
+      <div style={{ maxHeight: 240, overflowY: "auto" }}>
+        {loading && (
           <p style={{ fontSize: 12, color: "var(--text-dim)", padding: "8px 4px", margin: 0 }}>
-            Sin etiquetas. Creá la primera abajo.
+            Cargando…
           </p>
         )}
-        {allLabels.map((label) => {
+
+        {!loading && allLabels.length === 0 && (
+          <p style={{ fontSize: 12, color: "var(--text-dim)", padding: "8px 4px", margin: 0, lineHeight: 1.5 }}>
+            No hay etiquetas todavía. Créalas en la app de <b>WhatsApp Business</b> (Menú → Etiquetas) y aparecerán aquí automáticamente.
+          </p>
+        )}
+
+        {!loading && allLabels.map((label) => {
           const assigned = assignedIds.has(label.id);
+          const busy = busyId === label.id;
           return (
-            <div
+            <button
               key={label.id}
-              style={{ display: "flex", alignItems: "center", gap: 4 }}
-              onMouseEnter={(e) => {
-                const del = e.currentTarget.querySelector("[data-del]") as HTMLElement;
-                if (del) del.style.opacity = "1";
+              disabled={busy}
+              onClick={() => toggleAssign(label.id, assigned)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                textAlign: "left",
+                padding: "6px 8px",
+                borderRadius: "var(--radius-sm)",
+                transition: "background 0.1s",
+                fontSize: 13.5,
+                color: "var(--text)",
+                opacity: busy ? 0.5 : 1,
+                cursor: busy ? "default" : "pointer"
               }}
-              onMouseLeave={(e) => {
-                const del = e.currentTarget.querySelector("[data-del]") as HTMLElement;
-                if (del) del.style.opacity = "0";
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
-              <button
-                onClick={() => toggleAssign(label.id, assigned)}
+              <span
                 style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  textAlign: "left",
-                  padding: "6px 8px",
-                  borderRadius: "var(--radius-sm)",
-                  transition: "background 0.1s",
-                  fontSize: 13.5,
-                  color: "var(--text)"
+                  width: 14, height: 14, borderRadius: 4,
+                  background: assigned ? label.color : "transparent",
+                  border: `2px solid ${label.color}`,
+                  flexShrink: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  color: "#fff",
+                  fontSize: 9,
+                  fontWeight: 700
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
-                <span
-                  style={{
-                    width: 14, height: 14, borderRadius: 4,
-                    background: assigned ? label.color : "transparent",
-                    border: `2px solid ${label.color}`,
-                    flexShrink: 0,
-                    display: "grid",
-                    placeItems: "center",
-                    color: "#fff",
-                    fontSize: 9,
-                    fontWeight: 700
-                  }}
-                >
-                  {assigned && "✓"}
-                </span>
-                <span style={{ flex: 1 }}>{label.name}</span>
-              </button>
-              <button
-                data-del
-                onClick={() => handleDeleteLabel(label.id)}
-                style={{
-                  opacity: 0,
-                  fontSize: 11,
-                  color: "var(--danger)",
-                  padding: "0 6px",
-                  transition: "opacity 0.1s"
-                }}
-                title="Borrar etiqueta"
-              >
-                ✕
-              </button>
-            </div>
+                {assigned && "✓"}
+              </span>
+              <span style={{ flex: 1 }}>{label.name}</span>
+            </button>
           );
         })}
       </div>
 
+      {error && (
+        <div style={{ fontSize: 11.5, color: "var(--danger)", padding: "6px 4px 0", lineHeight: 1.4 }}>
+          {error}
+        </div>
+      )}
+
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}>
-        {!creating ? (
-          <button
-            onClick={() => setCreating(true)}
-            style={{
-              fontSize: 12,
-              color: "var(--accent)",
-              fontWeight: 600,
-              padding: "4px 4px"
-            }}
-          >
-            + Crear etiqueta
-          </button>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="Nombre"
-              maxLength={40}
-              autoFocus
-              style={{
-                background: "var(--bg-elev-2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "6px 10px",
-                fontSize: 13,
-                color: "var(--text)",
-                outline: 0,
-                fontFamily: "inherit"
-              }}
-            />
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {PALETTE.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setNewColor(c)}
-                  style={{
-                    width: 20, height: 20, borderRadius: "50%",
-                    background: c,
-                    border: newColor === c ? `2px solid var(--text)` : "2px solid transparent",
-                    transition: "transform 0.1s"
-                  }}
-                  title={c}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                onClick={handleCreate}
-                disabled={!newName.trim()}
-                style={{
-                  background: newName.trim() ? "var(--accent)" : "var(--bg-elev-2)",
-                  color: newName.trim() ? "#fff" : "var(--text-dim)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: "5px 12px",
-                  borderRadius: "var(--radius-sm)"
-                }}
-              >
-                Crear
-              </button>
-              <button
-                onClick={() => { setCreating(false); setNewName(""); }}
-                style={{ fontSize: 12, color: "var(--text-muted)", padding: "5px 8px" }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
+        <p style={{ fontSize: 10.5, color: "var(--text-dim)", margin: 0, padding: "0 4px", lineHeight: 1.4 }}>
+          Las etiquetas se sincronizan con tu WhatsApp Business en ambos sentidos.
+        </p>
       </div>
     </div>
   );

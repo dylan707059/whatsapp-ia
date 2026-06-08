@@ -31,7 +31,9 @@ export interface Conversation {
 }
 
 export interface LabelLite {
-  id: number;
+  // Las etiquetas internas usan id numérico; las de WhatsApp Business usan
+  // id de texto. Aceptamos ambos para poder mostrar las nativas en el panel.
+  id: number | string;
   name: string;
   color: string;
 }

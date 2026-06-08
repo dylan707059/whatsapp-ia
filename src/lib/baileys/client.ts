@@ -13,7 +13,7 @@ import fs from "node:fs";
 import {
   setAccountConnection, getAccountConnection, setAccountOwnerPhone, setAccountAutomationPaused,
   getConversationByPhone, archiveConversation, unarchiveConversation, discardPendingOutboxForOwner,
-  upsertWaLabel
+  upsertWaLabel, setWaLabelAssoc, removeWaLabelAssoc
 } from "../db";
 import { setupMessageHandler } from "./handler";
 import { registerContact } from "./contact-store";
@@ -173,6 +173,30 @@ async function _start(accountId: number): Promise<void> {
       console.log(`[bot] (acc ${accountId}) Etiqueta WA capturada: "${label.name}" id=${label.id} predef=${label.predefinedId ?? "-"}`);
     } catch (err) {
       console.error("[bot] Error guardando etiqueta WA:", err);
+    }
+  });
+
+  // Asociación etiqueta ↔ chat: cuando en el CELULAR pones/quitas una etiqueta a
+  // un chat, WhatsApp lo propaga aquí. Lo reflejamos en el panel (celular → panel).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sock.ev.on("labels.association", (arg: any) => {
+    const phone = (sock.user?.id ?? "").split(":")[0];
+    if (!phone) return;
+    const assoc = arg?.association ?? {};
+    const chatId: string | undefined = assoc.chatId;
+    const labelId = assoc.labelId != null ? String(assoc.labelId) : undefined;
+    // Solo nos interesa la etiqueta a nivel de CHAT; ignoramos las de mensajes.
+    if (!chatId || !labelId || assoc.messageId) return;
+    try {
+      if (arg?.type === "remove") {
+        removeWaLabelAssoc(phone, labelId, chatId);
+        console.log(`[bot] (acc ${accountId}) Etiqueta ${labelId} QUITADA de ${chatId} (desde celular)`);
+      } else {
+        setWaLabelAssoc(phone, labelId, chatId);
+        console.log(`[bot] (acc ${accountId}) Etiqueta ${labelId} PUESTA a ${chatId} (desde celular)`);
+      }
+    } catch (err) {
+      console.error("[bot] Error guardando asociación de etiqueta WA:", err);
     }
   });
 

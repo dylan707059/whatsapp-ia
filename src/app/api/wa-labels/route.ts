@@ -41,6 +41,19 @@ export async function GET(req: NextRequest) {
         AND EXISTS (SELECT 1 FROM conversations c WHERE c.owner_phone = a.owner_phone AND c.phone = a.chat_jid)
     `).get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
 
+    // Asociaciones más recientes (para ver si la captura en vivo funciona)
+    const recientes = (db.prepare(`
+      SELECT label_id, chat_jid, datetime(updated_at,'unixepoch','localtime') AS cuando
+      FROM wa_label_assoc WHERE owner_phone = ? ORDER BY updated_at DESC LIMIT 8
+    `).all(ownerPhone) as { label_id: string; chat_jid: string; cuando: string }[]);
+    const hace1h = Math.floor(Date.now() / 1000) - 3600;
+    const asocUltimaHora = (db.prepare(
+      "SELECT COUNT(*) AS n FROM wa_label_assoc WHERE owner_phone = ? AND updated_at >= ?"
+    ).get(ownerPhone, hace1h) as { n: number } | undefined)?.n ?? 0;
+    const opsPendientes = (db.prepare(
+      "SELECT COUNT(*) AS n FROM wa_label_ops WHERE owner_phone = ? AND processed = 0"
+    ).get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
+
     return NextResponse.json({
       labels,
       _diag: {
@@ -51,6 +64,9 @@ export async function GET(req: NextRequest) {
         waLabelsActivas: labels.length,
         asociaciones: assoc,
         asociacionesQueCoinciden: matches,
+        asociacionesUltimaHora: asocUltimaHora,
+        opsPendientesPanelHaciaWhats: opsPendientes,
+        asociacionesRecientes: recientes,
         muestraJidsEtiquetas: assocJids,
         muestraTelefonosConversaciones: convPhones
       }

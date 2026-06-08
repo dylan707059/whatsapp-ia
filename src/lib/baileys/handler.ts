@@ -490,7 +490,7 @@ async function handleConfirmation(
 }
 
 // ─── Etiqueta nativa de WhatsApp Business al confirmar ────────────────────────
-const LABEL_TARGET = process.env.WA_CONFIRM_LABEL ?? "Nuevo pedido";
+const LABEL_TARGET = process.env.WA_CONFIRM_LABEL ?? "Nuevo cliente";
 
 async function applyNuevoPedidoLabel(sock: WASocket, convPhoneJid: string): Promise<void> {
   const ownerPhone = (sock.user?.id ?? "").split(":")[0];

@@ -476,22 +476,44 @@ async function handleConfirmation(
   const fresh = getConversationById(conversationId);
   if (!fresh) return;
 
-  // Anti-duplicado: releer desde SQLite dentro de la cola
+  // Releer order desde SQLite. CLAVE anti "el bot no responde": si el cliente
+  // confirmó en un chat duplicado (@lid sin pedido), buscamos su pedido real en
+  // el chat hermano por nombre y confirmamos ESE. Así el bot SIEMPRE responde y
+  // avisa al dueño, sin importar en cuál de los chats duplicados haya escrito.
   console.log(`[bot] Releyendo order desde SQLite`);
-  const activeOrder     = getActiveOrder(conversationId);
-  const alreadyNotified = activeOrder?.owner_notified_at ?? fresh.owner_notified_at;
+  const ownerPhone = (sock.user?.id ?? "").split(":")[0];
+  let orderConvId = conversationId;
+  let activeOrder = getActiveOrder(conversationId);
+
+  if (!activeOrder && fresh.name) {
+    const realConv = findRecentShopifyConversationByName(ownerPhone, fresh.name);
+    if (realConv && realConv.id !== conversationId) {
+      const siblingOrder = getActiveOrder(realConv.id);
+      if (siblingOrder) {
+        orderConvId = realConv.id;
+        activeOrder = siblingOrder;
+        console.log(
+          `[bot] Confirmación en chat #${conversationId} sin pedido; uso el pedido ` +
+          `del chat real #${realConv.id} ("${fresh.name}")`
+        );
+      }
+    }
+  }
+
+  const orderConvRow = orderConvId === conversationId ? fresh : getConversationById(orderConvId);
+  const alreadyNotified = activeOrder?.owner_notified_at ?? orderConvRow?.owner_notified_at;
 
   if (alreadyNotified) {
-    console.log(`[bot] Pedido ${activeOrder?.id ?? conversationId} ya estaba notificado, se omite duplicado`);
+    console.log(`[bot] Pedido ${activeOrder?.id ?? orderConvId} ya estaba notificado, se omite duplicado`);
     return;
   }
 
-  // Obtener datos desde orders table o historial
-  let orderData = activeOrder ? orderFromRecord(activeOrder, conversationId) : null;
+  // Obtener datos desde orders table o historial (del chat que tiene el pedido)
+  let orderData = activeOrder ? orderFromRecord(activeOrder, orderConvId) : null;
 
   if (!orderData) {
-    const history = getRecentHistory(conversationId, 50);
-    orderData = extractOrderData(history, conversationId);
+    const history = getRecentHistory(orderConvId, 50);
+    orderData = extractOrderData(history, orderConvId);
   }
 
   // Sin datos del pedido: no podemos confirmar nada. NO marcamos confirmed_at
@@ -515,8 +537,10 @@ async function handleConfirmation(
     return;
   }
 
-  // A partir de aquí SÍ confirmamos: marcamos la conv y avisamos al dueño.
-  if (!fresh.confirmed_at) setConfirmedAt(conversationId);
+  // A partir de aquí SÍ confirmamos: marcamos el chat con el pedido (para que
+  // los recordatorios paren) y también el chat donde escribió (para silenciarlo).
+  if (!orderConvRow?.confirmed_at) setConfirmedAt(orderConvId);
+  if (orderConvId !== conversationId && !fresh.confirmed_at) setConfirmedAt(conversationId);
 
   if (missing.length > 0) {
     console.warn(

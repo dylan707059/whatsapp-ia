@@ -23,8 +23,8 @@ export default function LabelsPopover({ conversationId, onClose }: Props) {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/wa-labels", { cache: "no-store" }).then((r) => r.json() as Promise<{ labels: WaLabel[] }>),
-      fetch(`/api/conversations/${conversationId}/wa-labels`, { cache: "no-store" }).then((r) => r.json() as Promise<{ labelIds: string[] }>)
+      fetch(`/api/wa-labels?t=${Date.now()}`, { cache: "no-store" }).then((r) => r.json() as Promise<{ labels: WaLabel[] }>),
+      fetch(`/api/conversations/${conversationId}/wa-labels?t=${Date.now()}`, { cache: "no-store" }).then((r) => r.json() as Promise<{ labelIds: string[] }>)
     ]).then(([all, assigned]) => {
       setAllLabels(all.labels ?? []);
       setAssignedIds(new Set(assigned.labelIds ?? []));

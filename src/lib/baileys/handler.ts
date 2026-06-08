@@ -19,7 +19,8 @@ import {
   isAutomationPausedForPhone,
   findWaLabelIdByName,
   listWaLabels,
-  setWaLabelAssoc
+  setWaLabelAssoc,
+  setAppState
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
@@ -68,6 +69,48 @@ function isIndividualJid(jid: string): boolean {
   return jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid");
 }
 
+// Extrae el número real (PN) de un mensaje cuyo remoteJid es @lid.
+// WhatsApp suele incluir el número en campos "alt" del key. Probamos varios
+// porque el nombre exacto cambió entre versiones de Baileys/WhatsApp.
+function extractPnFromMsg(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  msg: any
+): string | null {
+  const k = msg?.key ?? {};
+  const candidates: unknown[] = [
+    k.remoteJidAlt, k.participantAlt, k.senderPn, k.participantPn,
+    k.remoteJidPn, msg?.senderPn, msg?.participantPn
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.endsWith("@s.whatsapp.net")) {
+      const d = c.split("@")[0].split(":")[0];
+      if (/^\d{8,15}$/.test(d)) return d;
+    }
+  }
+  return null;
+}
+
+// Intenta resolver un @lid a número real usando el mapa interno de Baileys
+// (signalRepository.lidMapping), si la versión lo expone.
+function lidMappingPn(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sock: any,
+  lidJid: string
+): string | null {
+  try {
+    const lm = sock?.signalRepository?.lidMapping;
+    const fn = lm?.getPNForLID ?? lm?.getPnForLid;
+    if (typeof fn === "function") {
+      const pn = fn.call(lm, lidJid);
+      if (typeof pn === "string" && pn.includes("@")) {
+        const d = pn.split("@")[0].split(":")[0];
+        if (/^\d{8,15}$/.test(d)) return d;
+      }
+    }
+  } catch { /* la versión no lo soporta */ }
+  return null;
+}
+
 export function setupMessageHandler(sock: WASocket): void {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
@@ -92,6 +135,27 @@ async function processMessage(
 
   const rawOwnerId  = sock.user?.id ?? "";
   const ownerPhone  = rawOwnerId.split(":")[0];
+
+  // ─── Resolución temprana de @lid → número real ────────────────────────────
+  // Si el mensaje llega por @lid, intentamos sacar el número real de los campos
+  // extra del mensaje o del mapa interno de Baileys, y lo registramos YA. Así
+  // resolvePhone() lo encuentra y el chat cae en el correcto, SIN duplicarse.
+  if (jid.endsWith("@lid")) {
+    const pn = extractPnFromMsg(msg) ?? lidMappingPn(sock, jid);
+    if (pn) {
+      try {
+        registerContact(`${pn}@s.whatsapp.net`, jid);
+        console.log(`[handler] LID ${jid} resuelto a ${pn} (campo del mensaje/Baileys)`);
+      } catch { /* noop */ }
+    } else {
+      // No se pudo resolver: guardamos los nombres de campo del key para
+      // descubrir cuál trae el número en esta versión de WhatsApp (diagnóstico).
+      try {
+        const keyFields = Object.keys(msg?.key ?? {});
+        setAppState("last_unresolved_lid_keys", JSON.stringify({ jid, keyFields, at: Date.now() }));
+      } catch { /* noop */ }
+    }
+  }
 
   // ─── Mensajes fromMe ─────────────────────────────────────────────────────
   // Mensajes enviados desde el celular del dueño (no desde el bot/dashboard).

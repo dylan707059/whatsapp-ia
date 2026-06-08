@@ -54,11 +54,16 @@ export async function GET(req: NextRequest) {
       "SELECT COUNT(*) AS n FROM wa_label_ops WHERE owner_phone = ? AND processed = 0"
     ).get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
 
+    const ultimoLidSinResolver = (db.prepare(
+      "SELECT value FROM app_state WHERE key = 'last_unresolved_lid_keys'"
+    ).get() as { value: string } | undefined)?.value ?? null;
+
     return NextResponse.json({
       labels,
       _diag: {
         loggedIn: Boolean(account),
         ownerPhone: ownerPhone || "(vacío — WhatsApp no conectado para esta cuenta)",
+        ultimoLidSinResolver,
         waLabelsTotal: rawAll,
         waLabelsDeleted: rawDeleted,
         waLabelsActivas: labels.length,

@@ -421,8 +421,6 @@ async function handleConfirmation(
     return;
   }
 
-  if (!fresh.confirmed_at) setConfirmedAt(conversationId);
-
   // Obtener datos desde orders table o historial
   let orderData = activeOrder ? orderFromRecord(activeOrder, conversationId) : null;
 
@@ -431,20 +429,35 @@ async function handleConfirmation(
     orderData = extractOrderData(history, conversationId);
   }
 
-  if (!orderData) return;
+  // Sin datos del pedido: no podemos confirmar nada. NO marcamos confirmed_at
+  // para que el cliente pueda reintentar y el flujo no quede en silencio.
+  if (!orderData) {
+    console.warn(`[bot] Confirmación en conv ${conversationId} sin datos de pedido — se ignora`);
+    return;
+  }
 
   const missing = validateOrderData(orderData);
 
-  if (missing.length > 0) {
-    // Para pedidos SHOPIFY que ya están registrados, NO le pedimos campos
-    // faltantes al cliente (los datos vienen de Shopify, no del chat).
-    // Para pedidos viejos modo AI, sí seguimos pidiendo lo que falta.
-    if (mode === "AI" && !activeOrder) {
-      const reply = `Para confirmar tu pedido, solo me falta: ${missing.join(", ")}.`;
-      insertMessage(conversationId, "assistant", reply);
-      await botSend(sock, jid, reply);
-    }
+  // Pedido AI incompleto (sin registro en orders): pedimos los campos faltantes
+  // y NO confirmamos todavía — el cliente puede completarlos y reintentar.
+  // IMPORTANTE: para pedidos SHOPIFY (activeOrder existe) NUNCA bloqueamos por
+  // campos faltantes: el dueño DEBE enterarse aunque Shopify haya mandado algún
+  // dato vacío. De lo contrario el pedido se pierde (bot en silencio + sin aviso).
+  if (missing.length > 0 && mode === "AI" && !activeOrder) {
+    const reply = `Para confirmar tu pedido, solo me falta: ${missing.join(", ")}.`;
+    insertMessage(conversationId, "assistant", reply);
+    await botSend(sock, jid, reply);
     return;
+  }
+
+  // A partir de aquí SÍ confirmamos: marcamos la conv y avisamos al dueño.
+  if (!fresh.confirmed_at) setConfirmedAt(conversationId);
+
+  if (missing.length > 0) {
+    console.warn(
+      `[bot] Pedido SHOPIFY #${activeOrder?.id ?? "?"} confirmado con campos faltantes ` +
+      `(${missing.join(", ")}) — se notifica al dueño igual para no perderlo`
+    );
   }
 
   // Responder al cliente confirmando (siempre, ya que el pedido es válido

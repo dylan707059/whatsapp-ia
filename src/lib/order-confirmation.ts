@@ -152,16 +152,19 @@ export function extractOrderData(
 
   const t = botMsg.content;
 
+  // Los emojis varían entre la plantilla de la IA (system-prompt) y la de
+  // Shopify (shopify.ts): teléfono 📞/📱, total 💰/💵, talla "Talla"/"Talla body/top".
+  // Aceptamos ambas variantes para que el respaldo funcione con cualquiera.
   const nombre    = extractField(t, /👤 Nombre:\s*(.+)/);
   const apellido  = extractField(t, /👤 Apellido:\s*(.+)/);
-  const telefono  = extractField(t, /📞 Teléfono:\s*(.+)/);
+  const telefono  = extractField(t, /(?:📞|📱) Teléfono:\s*(.+)/);
   const producto  = extractField(t, /🛍️ Producto[^:]*:\s*(.+)/);
   const color     = extractField(t, /🎨 Color:\s*(.+)/);
-  const talla     = extractField(t, /📏 Talla:\s*(.+)/);
+  const talla     = extractField(t, /📏 Talla[^:]*:\s*(.+)/);
   const cantidad  = extractField(t, /🔢 Cantidad:\s*(.+)/);
-  const total     = extractField(t, /💰 Total a pagar:\s*(.+)/);
+  const total     = extractField(t, /(?:💰|💵) Total a pagar:\s*(.+)/);
   const envio     = extractField(t, /🚚 Envío:\s*(.+)/);
-  const pago      = extractField(t, /💳 Pago:\s*(.+)/);
+  const pago      = extractField(t, /💳 Pago[^:]*:\s*(.+)/);
   const direccion = extractField(t, /📍 Dirección:\s*(.+)/);
   const ciudad    = extractField(t, /🏙️ Ciudad:\s*(.+)/);
   const depto     = extractField(t, /📌 Departamento:\s*(.+)/);

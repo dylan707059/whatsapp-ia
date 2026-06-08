@@ -9,7 +9,6 @@ import {
   incrementUnread,
   getRecentHistory,
   setConfirmedAt,
-  setAiPausedUntil,
   setConversationMode,
   isClientBlocked,
   advancePendingOutbox,
@@ -46,7 +45,6 @@ import { insertOrderEvent } from "../order-events";
 import { withCustomerLock } from "../customer-lock";
 import type { Conversation } from "../types";
 
-const AI_PAUSE_MINUTES = 30;
 
 // Extrae el primer número de teléfono colombiano de un texto.
 // Detecta: +573117678790  /  573117678790  /  3117678790  (con/sin espacios y guiones)
@@ -201,9 +199,10 @@ async function processMessage(
       }
     }
 
-    // Pausar IA en esta conv para no pisar al humano que está atendiendo manualmente
-    const pauseUntil = Math.floor(Date.now() / 1000) + AI_PAUSE_MINUTES * 60;
-    setAiPausedUntil(conv.id, pauseUntil);
+    // NO pausamos la IA al escribir manualmente: el dueño quiere que la
+    // automatización SOLO se apague con el botón 🤖, no sola cada vez que
+    // escribe desde el celular. La pausa global (automation_paused) sigue
+    // siendo el único interruptor de apagado.
     return;
   }
 

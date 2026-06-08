@@ -27,8 +27,20 @@ export async function GET(req: NextRequest) {
       .get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
     const assoc = (db.prepare("SELECT COUNT(*) AS n FROM wa_label_assoc WHERE owner_phone = ?")
       .get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
-    const sample = db.prepare("SELECT label_id, name, color, deleted FROM wa_labels WHERE owner_phone = ? LIMIT 30")
-      .all(ownerPhone);
+    // Muestras de JIDs para detectar desajuste de formato (@lid vs @s.whatsapp.net)
+    const assocJids = (db.prepare(
+      "SELECT DISTINCT chat_jid FROM wa_label_assoc WHERE owner_phone = ? LIMIT 10"
+    ).all(ownerPhone) as { chat_jid: string }[]).map((r) => r.chat_jid);
+    const convPhones = (db.prepare(
+      "SELECT phone FROM conversations WHERE owner_phone = ? LIMIT 10"
+    ).all(ownerPhone) as { phone: string }[]).map((r) => r.phone);
+    // Cuántas asociaciones tienen un chat_jid que coincide con una conversación
+    const matches = (db.prepare(`
+      SELECT COUNT(*) AS n FROM wa_label_assoc a
+      WHERE a.owner_phone = ?
+        AND EXISTS (SELECT 1 FROM conversations c WHERE c.owner_phone = a.owner_phone AND c.phone = a.chat_jid)
+    `).get(ownerPhone) as { n: number } | undefined)?.n ?? 0;
+
     return NextResponse.json({
       labels,
       _diag: {
@@ -38,7 +50,9 @@ export async function GET(req: NextRequest) {
         waLabelsDeleted: rawDeleted,
         waLabelsActivas: labels.length,
         asociaciones: assoc,
-        muestra: sample
+        asociacionesQueCoinciden: matches,
+        muestraJidsEtiquetas: assocJids,
+        muestraTelefonosConversaciones: convPhones
       }
     });
   }

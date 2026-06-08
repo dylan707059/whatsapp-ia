@@ -57,5 +57,5 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ labels });
+  return NextResponse.json({ labels }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -22,7 +22,10 @@ export async function GET(req: NextRequest, { params }: Ctx) {
   const conv = requireOwnedConversation(req, id);
   if (!conv) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
 
-  return NextResponse.json({ labelIds: listWaLabelIdsForChat(conv.owner_phone, conv.phone) });
+  return NextResponse.json(
+    { labelIds: listWaLabelIdsForChat(conv.owner_phone, conv.phone) },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 /** POST {labelId}: pone una etiqueta WA al chat. Se refleja en el panel al

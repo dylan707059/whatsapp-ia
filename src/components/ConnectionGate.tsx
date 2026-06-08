@@ -118,7 +118,7 @@ export default function ConnectionGate() {
       const url = view === "archived"
         ? "/api/conversations?archived=true"
         : "/api/conversations";
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json() as {
         conversations: ConversationWithPreview[];

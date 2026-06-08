@@ -41,7 +41,7 @@ export default function Sidebar(props: Props) {
   }, []);
 
   useEffect(() => {
-    fetch("/api/wa-labels")
+    fetch("/api/wa-labels", { cache: "no-store" })
       .then((r) => r.json() as Promise<{ labels: Label[] }>)
       .then((d) => setLabels(d.labels ?? []))
       .catch(() => {});

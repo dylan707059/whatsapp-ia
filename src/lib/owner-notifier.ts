@@ -3,7 +3,6 @@ import type { OrderData } from "./types";
 import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getAccountByOwnerPhone, getAccountSettings } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
-import { enqueueOrderTask } from "./queue";
 import { insertOrderEvent } from "./order-events";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -57,22 +56,6 @@ function buildSummaryMessage(data: OrderData, orderId?: number): string {
     `📍 *${data.address}*`,
     `🏙️ ${data.city}, ${data.department}`
   ].join("\n");
-}
-
-// ─── Cola unificada ───────────────────────────────────────────────────────────
-// Redirige a la cola global FIFO para no mezclar con las confirmaciones.
-
-export function enqueueOwnerNotification(
-  sock: WASocket,
-  data: OrderData
-): void {
-  const snapshot = { ...data };
-  enqueueOrderTask(
-    `notificacion:${data.conversationId}`,
-    async () => {
-      await sendOwnerNotificationSequentially(sock, snapshot);
-    }
-  );
 }
 
 // ─── Envío secuencial ─────────────────────────────────────────────────────────

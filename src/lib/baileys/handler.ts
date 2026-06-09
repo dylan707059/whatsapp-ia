@@ -23,7 +23,7 @@ import {
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
-import { generateReply, verifyConfirmationWithAI } from "../openai";
+import { verifyConfirmationWithAI } from "../openai";
 import {
   confirmationStrength,
   extractOrderData,
@@ -35,7 +35,6 @@ import {
   sleep
 } from "../owner-notifier";
 import { isComplaintMessage, buildComplaintAlert } from "../complaint";
-import { handleOwnerCommand } from "../commands";
 import { getActiveOrder } from "../orders";
 import { registerBotMessage, isBotSentMessage } from "../bot-messages";
 import { botSend } from "./send";
@@ -241,19 +240,13 @@ async function processMessage(
   const pushName: string | undefined = msg.pushName;
   console.log(`[bot] ← ${jid}: ${text ? `"${text}"` : `[${incomingMedia?.kind}]`}`);
 
-  // ─── Comandos del owner ───────────────────────────────────────────────────
-  // Los mensajes del owner se GUARDAN (para que aparezcan en el dashboard como
-  // historial), pero el bot solo ejecuta el comando si empieza con "/". Los
-  // mensajes normales del owner quedan visibles pero no disparan IA.
+  // ─── Mensajes del owner ──────────────────────────────────────────────────
+  // Se guardan para que aparezcan en el dashboard como historial.
   if (isOwner) {
-    if (!text?.trim()) return; // media del owner: se ignora
+    if (!text?.trim()) return;
     const ownerConv = getOrCreateConversation(jid, msg.pushName ?? `Owner +${senderPhone}`, ownerPhone);
     insertMessage(ownerConv.id, "user", text);
-
-    if (text.trim().startsWith("/")) {
-      await handleOwnerCommand(sock, jid, senderPhone, text.trim());
-    }
-    return; // Mensajes del owner sin slash: solo se guardan, no se procesan
+    return;
   }
 
   // ─── Bloqueo de cliente ───────────────────────────────────────────────────
@@ -367,15 +360,8 @@ async function processMessage(
     return;
   }
 
-  // ─── Verificar pausa de IA ────────────────────────────────────────────────
   const fresh = getConversationById(convo.id);
   if (!fresh) return;
-
-  const now = Math.floor(Date.now() / 1000);
-  const aiPaused = fresh.ai_paused_until && fresh.ai_paused_until > now;
-
-  // Cachear el active order para reusar en checks posteriores
-  const activeOrderForConv = getActiveOrder(convo.id);
 
   // ─── Confirmación del cliente ─────────────────────────────────────────────
   // La confirmación pasa por la cola incluso con IA pausada (HUMAN mode).
@@ -424,48 +410,6 @@ async function processMessage(
     );
   }
 
-  // ─── Flujo normal de IA ───────────────────────────────────────────────────
-  if (aiPaused) {
-    console.log(`[bot] IA pausada para ${jid}, ignorando mensaje`);
-    return;
-  }
-
-  if (fresh.mode !== "AI") return;
-
-  // ─── Bloquear IA en convs con pedido SHOPIFY ──────────────────────────────
-  // Si la conversación tiene CUALQUIER pedido SHOPIFY (incluso CONFIRMED o
-  // CANCELLED), la IA no debe responder: el flujo SHOPIFY ya maneja todas
-  // las confirmaciones y cualquier respuesta IA sería duplicada/conflictiva.
-  // El cliente puede reenviar los datos del pedido en el chat (típico de
-  // Releasit) y sin este check la IA generaría su propia confirmación.
-  if (activeOrderForConv && activeOrderForConv.source === "SHOPIFY") {
-    console.log(
-      `[bot] Conv ${convo.id} tiene order SHOPIFY #${activeOrderForConv.id} ` +
-      `(status ${activeOrderForConv.status}) — IA no responde para evitar duplicado`
-    );
-    return;
-  }
-
-  const history = getRecentHistory(convo.id, 20);
-  console.log(`[bot] Llamando LLM con ${history.length} mensajes...`);
-
-  const t0    = Date.now();
-  const reply = await generateReply(history);
-  console.log(`[bot] LLM respondió en ${Date.now() - t0}ms`);
-
-  if (!reply || reply === "[[NO_RESPONDER]]") {
-    console.log(`[bot] ✗ Sin respuesta (${reply || "vacío"})`);
-    return;
-  }
-
-  insertMessage(convo.id, "assistant", reply);
-  await botSend(sock, convo.phone, reply);
-  console.log(`[bot] → Enviado a ${convo.phone}`);
-
-  // Nota: la auto-extracción de pedido a partir del texto de la IA fue
-  // desactivada. Los pedidos ahora se crean SOLO desde el webhook de Shopify
-  // (ver /api/webhooks/shopify/orders-create). Esto evita confirmaciones
-  // duplicadas y mantiene una única fuente de verdad para los pedidos.
 }
 
 // ─── Confirmación (dentro de la cola) ────────────────────────────────────────

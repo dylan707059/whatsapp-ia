@@ -121,52 +121,6 @@ function looksLikeConfirmWord(word: string): boolean {
 }
 
 /**
- * Devuelve true si el texto se interpreta como confirmación final de pedido.
- *
- * Capas (cortocircuito en orden):
- *   1. NEGATIVE_PATTERNS → false (cancelar, cambiar, mal, no esta correcto, etc.)
- *   2. CONFIRMATION_EXACT → true (frase entera matchea)
- *   3. CONFIRMATION_PATTERNS → true (regex compuesto dentro del texto)
- *   4. Heurística suelta: mensaje corto (≤ 8 palabras) que contiene ALGUNA
- *      palabra positiva (si, ok, vale, perfecto, listo, claro, etc.) → true
- *
- * La capa 4 es la más permisiva pero requiere que el mensaje sea CORTO
- * (≤ 8 palabras) para no tomar como confirmación frases largas tipo
- * "perfecto, pero antes quiero cambiar el color".
- */
-export function isConfirmationMessage(text: string): boolean {
-  const norm = normalize(text);
-  if (!norm) return false;
-
-  // 1) Bloqueo por intención negativa explícita (siempre)
-  for (const neg of NEGATIVE_PATTERNS) {
-    if (neg.test(norm)) return false;
-  }
-
-  // 2) Match exacto
-  if (CONFIRMATION_EXACT.has(norm)) return true;
-
-  // 3) Match por patrón dentro de mensaje más largo
-  for (const re of CONFIRMATION_PATTERNS) {
-    if (re.test(norm)) return true;
-  }
-
-  // 4) Heurística suelta para mensajes cortos con keyword positivo
-  const words = norm.split(/\s+/);
-  if (words.length <= 8 && POSITIVE_RE.test(norm)) {
-    return true;
-  }
-
-  // 5) Tolerancia a errores de tipeo de "confirmado" en mensajes cortos
-  //    (ej: "corfimado", "comfirmado", "confirmd"). Evita que un typo mate el flujo.
-  if (words.length <= 4 && words.some(looksLikeConfirmWord)) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * Clasifica qué tan clara es la confirmación:
  *   - "strong": intención explícita de confirmar/despachar ("confirmado",
  *     "envíalo", "todo correcto"...). Se dispara directo.

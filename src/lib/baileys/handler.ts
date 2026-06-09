@@ -5,6 +5,7 @@ import {
   getConversationByPhone,
 
   insertMessage,
+  insertMessageFull,
   insertMediaMessage,
   incrementUnread,
   getRecentHistory,
@@ -19,7 +20,8 @@ import {
   findWaLabelIdByName,
   listWaLabels,
   setWaLabelAssoc,
-  setAppState
+  setAppState,
+  messageExistsByWaId
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
@@ -160,7 +162,10 @@ async function processMessage(
   // pausamos la IA en esa conv para no responder en paralelo.
   if (msg.key?.fromMe) {
     const msgId: string = msg.key?.id ?? "";
-    if (isBotSentMessage(msgId)) return; // skip ecos de mensajes que mando el bot
+    if (isBotSentMessage(msgId)) return; // eco del bot (registro en memoria, rápido)
+    // Anti-duplicado persistente: si ya guardamos un mensaje con este wa_msg_id,
+    // es un eco repetido (o un mensaje del bot cuyo registro en memoria expiró).
+    if (msgId && messageExistsByWaId(msgId)) return;
 
     // Resolver la conv correcta para el destinatario.
     // Si el destinatario es @lid, buscamos la conv real por teléfono (contact-store)
@@ -193,7 +198,8 @@ async function processMessage(
         msg.message?.conversation ??
         msg.message?.extendedTextMessage?.text;
       if (textFromMe?.trim()) {
-        insertMessage(conv.id, "human", textFromMe.trim());
+        // Guardamos CON wa_msg_id para que un eco repetido se detecte arriba.
+        insertMessageFull(conv.id, "human", textFromMe.trim(), msgId || null, true);
         console.log(`[bot] ← (yo desde celular) a ${jid}: "${textFromMe.slice(0, 60)}"`);
       }
     }

@@ -224,7 +224,15 @@ export function startBotRuntime(): void {
   setInterval(ensureAccountsConnected, 5000);
 
   // ─── Outbox poller + revokes ────────────────────────────────────────────────
+  // Guard anti-solapamiento: si un ciclo tarda más que el intervalo (envíos con
+  // awaits, sleeps al notificar dueños), el setInterval dispararía un segundo
+  // ciclo en paralelo haciendo trabajo redundante. Con este flag, un ciclo
+  // espera a que termine el anterior.
+  let outboxBusy = false;
   setInterval(async () => {
+    if (outboxBusy) return;
+    outboxBusy = true;
+    try {
     const nowSec = Math.floor(Date.now() / 1000);
 
     for (const h of listHandles()) {
@@ -341,10 +349,17 @@ export function startBotRuntime(): void {
         markRevokeDone(r.id);
       }
     }
+    } finally {
+      outboxBusy = false;
+    }
   }, 2000);
 
   // ─── Recordatorios Shopify (por cuenta, anti-blast tras caída) ───────────────
+  let remindersBusy = false;
   setInterval(async () => {
+    if (remindersBusy) return;
+    remindersBusy = true;
+    try {
     const nowSec = Math.floor(Date.now() / 1000);
     const recovering = recoveredFromDowntime;
     recoveredFromDowntime = false; // la recuperación se procesa una sola vez
@@ -437,6 +452,9 @@ export function startBotRuntime(): void {
           console.error(`[bot] Error cancelando order #${order.id}:`, err);
         }
       }
+    }
+    } finally {
+      remindersBusy = false;
     }
   }, REMINDER_CHECK_MS);
 

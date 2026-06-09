@@ -470,11 +470,25 @@ const CONV_SELECT_FIELDS = `
      WHERE conversation_id = c.id
      ORDER BY created_at DESC LIMIT 1) AS last_message_preview`;
 
+// Ocultamos los chats fantasma con ID de privacidad (@lid): conversaciones que
+// solo reciben el mensaje preparado del bot pero no tienen identidad ni respuesta
+// del cliente. Se esconden SOLO si: es @lid, sin nombre, sin pedido con teléfono,
+// y sin ningún mensaje entrante del cliente (role='user'). El cliente real aparece
+// en su propio chat con número resuelto, así que no se pierde nada.
+const HIDE_PHANTOM_LID = `
+    AND NOT (
+      c.phone LIKE '%@lid'
+      AND (c.name IS NULL OR c.name = '')
+      AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.conversation_id = c.id AND COALESCE(o.phone,'') != '')
+      AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.role = 'user')
+    )`;
+
 const stmtListConversations = db.prepare<[string], ConversationWithPreview>(`
   SELECT ${CONV_SELECT_FIELDS}
   FROM conversations c
   WHERE c.owner_phone = ?
     AND c.archived_at IS NULL
+    ${HIDE_PHANTOM_LID}
   ORDER BY
     c.pinned_at DESC NULLS LAST,
     c.last_message_at DESC NULLS LAST,

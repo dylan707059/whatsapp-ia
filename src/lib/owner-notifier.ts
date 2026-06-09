@@ -1,6 +1,6 @@
 import type { WASocket } from "@whiskeysockets/baileys";
 import type { OrderData } from "./types";
-import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getAccountByOwnerPhone, getAccountSettings, getConfirmGroupJid } from "./db";
+import { setOwnerNotifiedAt, getAccountByOwnerPhone, getAccountSettings, getConfirmGroupJid } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
 import { insertOrderEvent } from "./order-events";
@@ -108,14 +108,9 @@ export async function sendOwnerNotificationSequentially(
       if (r1?.key?.id) registerBotMessage(r1.key.id);
       await sleep(800);
 
-      // Guardar la notificación en la conversación del destino en el dashboard.
-      try {
-        const ownerConv = getOrCreateConversation(jid, label, botOwnerPhone);
-        insertMessage(ownerConv.id, "assistant", summary);
-      } catch (err) {
-        console.warn(`[bot] No se pudo guardar notif en conv de ${label}:`, err);
-      }
-
+      // NOTA: a propósito NO guardamos esta notificación como conversación en el
+      // dashboard. Es un mensaje interno (aviso al dueño / grupo), no un chat de
+      // cliente; guardarlo ensuciaba la lista con chats "Owner"/"Contacto".
       console.log(`[bot] Notificación del pedido ${orderId ?? data.conversationId} enviada a ${label} (${jid})`);
     } catch (err) {
       console.error(`[bot] Error enviando pedido ${orderId ?? data.conversationId} a ${label}:`, err);

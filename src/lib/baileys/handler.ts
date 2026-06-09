@@ -369,18 +369,17 @@ async function processMessage(
   // el cliente recibiría dos mensajes del bot (el template + la confirmación).
   const confStrength = confirmationStrength(text);
   if (confStrength !== "none") {
-    const snapId     = convo.id;
-    const snapJid    = convo.phone; // usar el JID real de la conv, no el LID
-    const snapMode   = fresh.mode;
-    const snapPhone  = senderPhone;
-    const snapText   = text;
+    const snapId    = convo.id;
+    const snapJid   = convo.phone;
+    const snapPhone = senderPhone;
+    const snapText  = text;
 
     console.log(`[bot] Confirmación detectada (${confStrength}) en conv ${snapId}`);
 
     enqueueOrderTask(`confirmacion:${snapId}`, async () => {
       await withCustomerLock(snapPhone, async () => {
-        // Las confirmaciones AMBIGUAS ("ok", "vale", "bueno") las verifica la IA
-        // con el contexto del chat antes de disparar, para no confirmar por error.
+        // Confirmaciones AMBIGUAS ("ok", "dale", "bueno"): verifica con IA antes
+        // de disparar, para no confirmar por error ante un saludo o pregunta.
         if (confStrength === "weak") {
           const recent  = getRecentHistory(snapId, 8);
           const verdict = await verifyConfirmationWithAI(recent, snapText);
@@ -390,9 +389,8 @@ async function processMessage(
           }
           console.log(`[bot] IA confirmó que "${snapText}" sí es confirmación`);
         }
-        // Recién aquí descartamos el template pendiente (ya decidimos confirmar).
         discardPendingOutboxForConversation(snapId);
-        await handleConfirmation(sock, snapJid, snapId, snapMode);
+        await handleConfirmation(sock, snapJid, snapId);
       });
     });
     return;
@@ -415,17 +413,15 @@ async function processMessage(
 async function handleConfirmation(
   sock: WASocket,
   jid: string,
-  conversationId: number,
-  mode: string
+  conversationId: number
 ): Promise<void> {
-  console.log(`[bot] Iniciando tarea en cola: confirmacion ${conversationId}`);
   console.log(`[bot] Cliente confirmó pedido en conversación ${conversationId}`);
 
   insertOrderEvent({
     conversationId,
     eventType: "CLIENT_CONFIRMED",
     message: "Cliente respondió CONFIRMADO",
-    metadata: { jid, mode }
+    metadata: { jid }
   });
 
   const fresh = getConversationById(conversationId);
@@ -480,29 +476,18 @@ async function handleConfirmation(
 
   const missing = validateOrderData(orderData);
 
-  // Pedido AI incompleto (sin registro en orders): pedimos los campos faltantes
-  // y NO confirmamos todavía — el cliente puede completarlos y reintentar.
-  // IMPORTANTE: para pedidos SHOPIFY (activeOrder existe) NUNCA bloqueamos por
-  // campos faltantes: el dueño DEBE enterarse aunque Shopify haya mandado algún
-  // dato vacío. De lo contrario el pedido se pierde (bot en silencio + sin aviso).
-  if (missing.length > 0 && mode === "AI" && !activeOrder) {
-    const reply = `Para confirmar tu pedido, solo me falta: ${missing.join(", ")}.`;
-    insertMessage(conversationId, "assistant", reply);
-    await botSend(sock, jid, reply);
-    return;
-  }
-
-  // A partir de aquí SÍ confirmamos: marcamos el chat con el pedido (para que
-  // los recordatorios paren) y también el chat donde escribió (para silenciarlo).
-  if (!orderConvRow?.confirmed_at) setConfirmedAt(orderConvId);
-  if (orderConvId !== conversationId && !fresh.confirmed_at) setConfirmedAt(conversationId);
-
+  // Si Shopify mandó algún dato vacío, igual notificamos al dueño para no perder el pedido.
   if (missing.length > 0) {
     console.warn(
       `[bot] Pedido SHOPIFY #${activeOrder?.id ?? "?"} confirmado con campos faltantes ` +
       `(${missing.join(", ")}) — se notifica al dueño igual para no perderlo`
     );
   }
+
+  // A partir de aquí SÍ confirmamos: marcamos el chat con el pedido (para que
+  // los recordatorios paren) y también el chat donde escribió (para silenciarlo).
+  if (!orderConvRow?.confirmed_at) setConfirmedAt(orderConvId);
+  if (orderConvId !== conversationId && !fresh.confirmed_at) setConfirmedAt(conversationId);
 
   // Responder al cliente confirmando (siempre, ya que el pedido es válido
   // y el cliente acaba de decir CONFIRMADO; este es el último mensaje del

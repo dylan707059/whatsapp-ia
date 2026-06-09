@@ -103,8 +103,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.error("[shopify] Error al fusionar conv @lid:", err);
   }
 
-  // Pasar a modo HUMAN para que la IA no responda automáticamente al cliente.
-  // El owner puede toggle a AI manualmente desde el dashboard si quiere.
+  // Marcar como HUMAN: indicador visual en el dashboard de que este chat
+  // es de Shopify y requiere atención manual del dueño.
   setConversationMode(conv.id, "HUMAN");
 
   const orderData = toOrderData(parsed, conv.id);

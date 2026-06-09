@@ -671,6 +671,27 @@ export function setAppState(key: string, value: string): void {
   stmtSetAppState.run(key, value);
 }
 
+// ─── Grupos de WhatsApp (capturados por el bot, leídos por la API) ────────────
+// El bot guarda aquí la lista de grupos donde está, porque las rutas API corren
+// en otra instancia de módulo y no comparten el socket en memoria.
+export interface WaGroupLite { id: string; name: string; }
+
+export function setWaGroups(ownerPhone: string, groups: WaGroupLite[]): void {
+  if (!ownerPhone) return;
+  setAppState(`wa_groups:${ownerPhone}`, JSON.stringify(groups));
+}
+export function getWaGroups(ownerPhone: string): WaGroupLite[] {
+  if (!ownerPhone) return [];
+  const raw = getAppState(`wa_groups:${ownerPhone}`);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as WaGroupLite[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getPendingOutbox(ownerPhone: string, limit = 20): OutboxItem[] {
   return stmtPendingOutbox.all(ownerPhone, limit);
 }

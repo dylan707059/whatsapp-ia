@@ -9,7 +9,7 @@ import {
   findRecentLidConversationByName, mergeConversationInto,
   getPendingWaLabelOps, markWaLabelOpDone,
   listOrphanLidConversations, findRecentShopifyConversationByName,
-  hasClientMessage, getManualGroupJid
+  hasClientMessage, getManualGroupJid, setWaGroups
 } from "./db";
 import { registerContact } from "./baileys/contact-store";
 import {
@@ -229,6 +229,31 @@ export function startBotRuntime(): void {
 
   // Asegurar conexiones
   setInterval(ensureAccountsConnected, 5000);
+
+  // ─── Captura de grupos de WhatsApp ──────────────────────────────────────────
+  // La API no comparte el socket (corre en otra instancia de módulo), así que el
+  // bot guarda en DB la lista de grupos donde está, para que Configuración los
+  // muestre. Se refresca al arrancar y cada 60s.
+  const refreshGroups = async () => {
+    for (const h of listHandles()) {
+      const conn = getAccountConnection(h.accountId);
+      if (conn.status !== "connected" || !conn.phone) continue;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sock = h.sock as any;
+        const map = await sock.groupFetchAllParticipating();
+        const groups = Object.values(map ?? {})
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((g: any) => ({ id: String(g.id), name: String(g.subject ?? g.id) }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setWaGroups(conn.phone, groups);
+      } catch (err) {
+        console.error(`[bot] (acc ${h.accountId}) Error capturando grupos:`, err);
+      }
+    }
+  };
+  setTimeout(refreshGroups, 8000);          // primer barrido tras conectar
+  setInterval(refreshGroups, 60_000);       // refresco periódico
 
   // ─── Outbox poller + revokes ────────────────────────────────────────────────
   // Guard anti-solapamiento: si un ciclo tarda más que el intervalo (envíos con

@@ -35,14 +35,19 @@ const CONFIRMATION_EXACT = new Set([
 // Aplican cuando el mensaje NO matchea exact pero tiene una frase clave.
 // Ejemplos: "hola, todo está correcto gracias", "Sí los datos están bien"
 const CONFIRMATION_PATTERNS: RegExp[] = [
-  /\btodo\s+(esta|esta|es|sale)?\s*(perfecto|correcto|bien|ok|en orden|listo)\b/,
-  /\b(los\s+)?datos\s+(estan|son|estan)?\s*(correctos|bien|ok|perfectos|exactos|completos)\b/,
+  /\btodo\s+(esta|es|sale)?\s*(perfecto|correcto|bien|ok|en orden|listo)\b/,
+  /\b(los\s+)?datos\s+(estan|son)?\s*(correctos|bien|ok|perfectos|exactos|completos)\b/,
   /\b(la\s+)?(informacion|info|direccion)\s+(esta|es)?\s*(correcta|bien|ok|perfecta|exacta|completa)\b/,
   /\b(envienmelo|mandenmelo|despachenmelo|envienlo|despachenlo|mandenlo)\b/,
   /\b(esta|es)\s+todo\s+(bien|correcto|ok|perfecto)\b/,
   /\bya\s+(puedes|pueden|podes|podeis)\s+(enviar|despachar|mandar)\b/,
   /\b(quedo|estoy)\s+esperando\s+(el\s+)?(envio|pedido|paquete)\b/,
-  /\b(quedo|me\s+quedo)\s+atenta?\s+(a\s+)?la?\s+(guia|envio)\b/
+  /\b(quedo|me\s+quedo)\s+atenta?\s+(a\s+)?la?\s+(guia|envio)\b/,
+  // Intención explícita de querer el pedido: "sí quiero el pedido", "lo quiero",
+  // "quiero mi pedido". (Las negativas tipo "quiero cambiar/cancelar" ya se
+  // filtran antes por NEGATIVE_PATTERNS, así que aquí "quiero" es seguro.)
+  /\b(si\s+)?(lo\s+|la\s+)?quiero\s+(el\s+|mi\s+)?(pedido|producto|paquete|articulo|envio)\b/,
+  /\b(si\s+)?(lo|la)\s+quiero\b/
 ];
 
 // Frases que indican EXPLICITAMENTE que algo NO está bien.
@@ -50,6 +55,8 @@ const CONFIRMATION_PATTERNS: RegExp[] = [
 const NEGATIVE_PATTERNS: RegExp[] = [
   /\b(no|nope|nah)\s+(esta|es)\s+(correcto|bien|ok|cierto)\b/,
   /\bno\s+confirmo\b/,
+  /\bno\s+(lo|la)?\s*quiero\b/,         // "no quiero", "no lo quiero"
+  /\bya\s+no\b/,                        // "ya no", "ya no lo quiero"
   /\bcambiar?\b/,                       // "quiero cambiar"
   /\bmodific(ar|a|o)\b/,                // "modificar"
   /\bcorrij(an|e|o)\b/,                 // "corrijan"
@@ -183,8 +190,8 @@ export function extractOrderData(
 
   const t = botMsg.content;
 
-  // Los emojis varían entre la plantilla de la IA (system-prompt) y la de
-  // Shopify (shopify.ts): teléfono 📞/📱, total 💰/💵, talla "Talla"/"Talla body/top".
+  // Los emojis varían entre plantillas (Shopify en shopify.ts y recordatorios):
+  // teléfono 📞/📱, total 💰/💵, talla "Talla"/"Talla body/top".
   // Aceptamos ambas variantes para que el respaldo funcione con cualquiera.
   const nombre    = extractField(t, /👤 Nombre:\s*(.+)/);
   const apellido  = extractField(t, /👤 Apellido:\s*(.+)/);

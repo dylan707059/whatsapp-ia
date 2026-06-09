@@ -338,17 +338,18 @@ async function processMessage(
     return;
   }
 
+  // Releemos la conv una sola vez para los checks que siguen (confirmación previa
+  // y la detección de confirmación del cliente).
+  const fresh = getConversationById(convo.id);
+  if (!fresh) return;
+
   // ─── SILENCIO post-confirmación ───────────────────────────────────────────
   // Una vez que el pedido fue confirmado (confirmed_at != null), el bot deja
-  // de hacer cualquier acción automática: ni IA, ni reclamos, ni nada.
-  // Cualquier mensaje del cliente queda guardado en el chat para que el owner
-  // lo atienda manualmente desde el dashboard.
-  {
-    const convCheck = getConversationById(convo.id);
-    if (convCheck?.confirmed_at) {
-      console.log(`[bot] Conversación ${convo.id} ya confirmada, bot en silencio`);
-      return;
-    }
+  // de hacer cualquier acción automática: ni reclamos, ni nada. Cualquier
+  // mensaje del cliente queda guardado para que el owner lo atienda manualmente.
+  if (fresh.confirmed_at) {
+    console.log(`[bot] Conversación ${convo.id} ya confirmada, bot en silencio`);
+    return;
   }
 
   // ─── Reclamo ──────────────────────────────────────────────────────────────
@@ -359,9 +360,6 @@ async function processMessage(
     await handleComplaint(sock, convo.phone, convo.id, senderPhone, text, ownerPhone);
     return;
   }
-
-  const fresh = getConversationById(convo.id);
-  if (!fresh) return;
 
   // ─── Confirmación del cliente ─────────────────────────────────────────────
   // La confirmación pasa por la cola incluso con IA pausada (HUMAN mode).

@@ -166,6 +166,44 @@ export function isConfirmationMessage(text: string): boolean {
   return false;
 }
 
+/**
+ * Clasifica qué tan clara es la confirmación:
+ *   - "strong": intención explícita de confirmar/despachar ("confirmado",
+ *     "envíalo", "todo correcto"...). Se dispara directo.
+ *   - "weak": aceptación ambigua ("ok", "vale", "bueno", "sí", "dale"...). Debe
+ *     verificarse con IA + contexto antes de disparar (puede no ser confirmación).
+ *   - "none": no es confirmación.
+ */
+export function confirmationStrength(text: string): "strong" | "weak" | "none" {
+  const norm = normalize(text);
+  if (!norm) return "none";
+
+  // Intención negativa explícita → nunca confirma
+  for (const neg of NEGATIVE_PATTERNS) {
+    if (neg.test(norm)) return "none";
+  }
+
+  const words = norm.split(/\s+/);
+
+  // ── STRONG: confirmación explícita ──────────────────────────────────────────
+  if (/\bconfirm/.test(norm)) return "strong";                       // confirmado/confirmo/...
+  if (words.length <= 4 && words.some(looksLikeConfirmWord)) return "strong"; // typos
+  if (/\b(envialo|despachalo|mandalo|envienlo|despachenlo|envienmelo|mandenmelo|despachenmelo|mandenlo|despachen|envien|manden)\b/.test(norm)) return "strong";
+  for (const re of CONFIRMATION_PATTERNS) {
+    if (re.test(norm)) return "strong";                              // "todo correcto", "datos bien"
+  }
+  if (CONFIRMATION_EXACT.has(norm) &&
+      /(correcto|correcta|bien|perfect|exact|asi|datos|informacion|orden)/.test(norm)) {
+    return "strong";                                                 // frases de validación de datos
+  }
+
+  // ── WEAK: aceptación ambigua (necesita verificación con IA) ──────────────────
+  if (CONFIRMATION_EXACT.has(norm)) return "weak";                   // "ok", "vale", "dale", "bueno"...
+  if (words.length <= 8 && POSITIVE_RE.test(norm)) return "weak";
+
+  return "none";
+}
+
 // ─── Extracción de datos ──────────────────────────────────────────────────────
 
 function extractField(text: string, pattern: RegExp): string {

@@ -23,9 +23,9 @@ import {
 } from "../db";
 import { detectMedia, saveIncomingMedia, type MediaKind } from "./media";
 import { registerContact } from "./contact-store";
-import { generateReply } from "../openai";
+import { generateReply, verifyConfirmationWithAI } from "../openai";
 import {
-  isConfirmationMessage,
+  confirmationStrength,
   extractOrderData,
   validateOrderData
 } from "../order-confirmation";
@@ -383,17 +383,31 @@ async function processMessage(
   // Sin esto, cuando el cliente confirma con su primer mensaje ("listo", "ok"),
   // el flujo avanzaría el template Y handleConfirmation enviaría "Perfecto" →
   // el cliente recibiría dos mensajes del bot (el template + la confirmación).
-  if (isConfirmationMessage(text)) {
+  const confStrength = confirmationStrength(text);
+  if (confStrength !== "none") {
     const snapId     = convo.id;
     const snapJid    = convo.phone; // usar el JID real de la conv, no el LID
     const snapMode   = fresh.mode;
     const snapPhone  = senderPhone;
+    const snapText   = text;
 
-    console.log(`[bot] Tarea agregada a cola: confirmacion ${snapId}`);
-    discardPendingOutboxForConversation(snapId);
+    console.log(`[bot] Confirmación detectada (${confStrength}) en conv ${snapId}`);
 
     enqueueOrderTask(`confirmacion:${snapId}`, async () => {
       await withCustomerLock(snapPhone, async () => {
+        // Las confirmaciones AMBIGUAS ("ok", "vale", "bueno") las verifica la IA
+        // con el contexto del chat antes de disparar, para no confirmar por error.
+        if (confStrength === "weak") {
+          const recent  = getRecentHistory(snapId, 8);
+          const verdict = await verifyConfirmationWithAI(recent, snapText);
+          if (verdict !== true) {
+            console.log(`[bot] "${snapText}" es ambiguo — IA dijo ${verdict}; NO se dispara confirmación`);
+            return;
+          }
+          console.log(`[bot] IA confirmó que "${snapText}" sí es confirmación`);
+        }
+        // Recién aquí descartamos el template pendiente (ya decidimos confirmar).
+        discardPendingOutboxForConversation(snapId);
         await handleConfirmation(sock, snapJid, snapId, snapMode);
       });
     });

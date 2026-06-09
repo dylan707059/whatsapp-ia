@@ -315,7 +315,9 @@ export function startBotRuntime(): void {
       }
 
       // ─── Operaciones de etiqueta encoladas por el panel (panel → WhatsApp) ──
-      for (const op of getPendingWaLabelOps(conn.phone, 20)) {
+      // Procesamos de a 1 por ciclo con pausa para no superar el rate-limit de WA.
+      const pendingOps = getPendingWaLabelOps(conn.phone, 1);
+      for (const op of pendingOps) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const sock = h.sock as any;
@@ -328,9 +330,15 @@ export function startBotRuntime(): void {
           await fn.call(sock, op.chat_jid, op.label_id);
           markWaLabelOpDone(op.id);
           console.log(`[bot] (acc ${h.accountId}) Etiqueta ${op.label_id} ${op.op === "remove" ? "quitada de" : "puesta a"} ${op.chat_jid} (desde panel)`);
-        } catch (err) {
-          console.error(`[bot] Error aplicando op de etiqueta #${op.id}:`, err);
-          markWaLabelOpDone(op.id); // no reintentar para no trabar la cola
+        } catch (err: unknown) {
+          const status = (err as { data?: number })?.data;
+          if (status === 429) {
+            // Rate-limit: dejamos el op pendiente para el próximo ciclo
+            console.warn(`[bot] Rate-limit WA en op #${op.id} — reintentando en el próximo ciclo`);
+          } else {
+            console.error(`[bot] Error aplicando op de etiqueta #${op.id}:`, err);
+            markWaLabelOpDone(op.id); // error no recuperable → descartar
+          }
         }
       }
     }

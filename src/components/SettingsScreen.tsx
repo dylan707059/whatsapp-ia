@@ -22,6 +22,8 @@ interface SettingsForm {
   blockedCities: string;
   blockedDepartmentCodes: string;
   ownerNotifyPhones: string;
+  confirmGroupJid: string;
+  manualGroupJid: string;
 }
 
 const EMPTY: SettingsForm = {
@@ -31,8 +33,12 @@ const EMPTY: SettingsForm = {
   blockedDepartments: "",
   blockedCities: "",
   blockedDepartmentCodes: "",
-  ownerNotifyPhones: ""
+  ownerNotifyPhones: "",
+  confirmGroupJid: "",
+  manualGroupJid: ""
 };
+
+interface WaGroup { id: string; name: string; }
 
 export default function SettingsScreen({ onSaved, allowSkip = false, embedded = false }: Props) {
   const [form, setForm] = useState<SettingsForm>(EMPTY);
@@ -40,6 +46,8 @@ export default function SettingsScreen({ onSaved, allowSkip = false, embedded = 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedOk, setSavedOk] = useState(false);
+  const [groups, setGroups] = useState<WaGroup[]>([]);
+  const [groupsError, setGroupsError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -55,13 +63,29 @@ export default function SettingsScreen({ onSaved, allowSkip = false, embedded = 
             blockedDepartments: s.blockedDepartments ?? "",
             blockedCities: s.blockedCities ?? "",
             blockedDepartmentCodes: s.blockedDepartmentCodes ?? "",
-            ownerNotifyPhones: s.ownerNotifyPhones ?? ""
+            ownerNotifyPhones: s.ownerNotifyPhones ?? "",
+            confirmGroupJid: s.confirmGroupJid ?? "",
+            manualGroupJid: s.manualGroupJid ?? ""
           });
         }
       } catch {
         // si falla, queda el formulario vacío
       } finally {
         setLoading(false);
+      }
+    })();
+  }, []);
+
+  // Cargar los grupos de WhatsApp donde está el bot (para los selectores).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/wa-groups", { cache: "no-store" });
+        const data = await res.json() as { groups?: WaGroup[]; error?: string };
+        setGroups(data.groups ?? []);
+        if (data.error) setGroupsError(data.error);
+      } catch {
+        setGroupsError("No se pudieron cargar los grupos");
       }
     })();
   }, []);
@@ -200,7 +224,7 @@ export default function SettingsScreen({ onSaved, allowSkip = false, embedded = 
           </Section>
 
           <Section title="📞 Notificaciones">
-            <Field label="Mis números para avisos" hint="Separados por coma, formato 57XXXXXXXXXX">
+            <Field label="Mis números para avisos" hint="Separados por coma, formato 57XXXXXXXXXX. Se usan si no eliges un grupo abajo.">
               <input
                 style={inputStyle}
                 value={form.ownerNotifyPhones}
@@ -208,6 +232,47 @@ export default function SettingsScreen({ onSaved, allowSkip = false, embedded = 
                 placeholder="573001234567,573009876543"
               />
             </Field>
+          </Section>
+
+          <Section title="👥 Grupos">
+            <p style={{ color: "var(--text-dim)", fontSize: 11.5, margin: 0, lineHeight: 1.5 }}>
+              Para usar grupos, agrega este WhatsApp a los grupos desde tu celular y
+              elígelos aquí. Si dejas un grupo en “Ninguno”, ese aviso va a tus números.
+            </p>
+            <Field label="Grupo de confirmaciones (Dropi)" hint="Cuando un cliente confirma, el aviso llega aquí, listo para subir a Dropi.">
+              <select
+                style={inputStyle}
+                value={form.confirmGroupJid}
+                onChange={(e) => update("confirmGroupJid", e.target.value)}
+              >
+                <option value="">— Ninguno (avisar a mis números) —</option>
+                {groupOptions(groups, form.confirmGroupJid).map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Grupo de envío manual al cliente" hint="Plantillas para reenviar al cliente y recordatorios llegan aquí.">
+              <select
+                style={inputStyle}
+                value={form.manualGroupJid}
+                onChange={(e) => update("manualGroupJid", e.target.value)}
+              >
+                <option value="">— Ninguno (avisar a mis números) —</option>
+                {groupOptions(groups, form.manualGroupJid).map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </Field>
+            {groupsError && (
+              <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
+                ⚠️ {groupsError}. Conecta WhatsApp y recarga para ver tus grupos.
+              </span>
+            )}
+            {!groupsError && groups.length === 0 && (
+              <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
+                No se encontraron grupos. Agrega este WhatsApp a un grupo y recarga.
+              </span>
+            )}
           </Section>
 
           {error && (
@@ -236,6 +301,16 @@ export default function SettingsScreen({ onSaved, allowSkip = false, embedded = 
       </div>
     </div>
   );
+}
+
+// Asegura que el grupo ya guardado aparezca en el selector aunque la lista de
+// grupos aún no haya cargado (ej: WhatsApp reconectando), para no perder la
+// selección actual visualmente.
+function groupOptions(groups: WaGroup[], current: string): WaGroup[] {
+  if (current && !groups.some((g) => g.id === current)) {
+    return [{ id: current, name: "Grupo seleccionado" }, ...groups];
+  }
+  return groups;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

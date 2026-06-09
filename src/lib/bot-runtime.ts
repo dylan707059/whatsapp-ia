@@ -9,7 +9,7 @@ import {
   findRecentLidConversationByName, mergeConversationInto,
   getPendingWaLabelOps, markWaLabelOpDone,
   listOrphanLidConversations, findRecentShopifyConversationByName,
-  hasClientMessage
+  hasClientMessage, getManualGroupJid
 } from "./db";
 import { registerContact } from "./baileys/contact-store";
 import {
@@ -147,11 +147,18 @@ function buildAutoCancelText(customerFirstName: string | null, orderNumber: stri
   ].join("\n");
 }
 
+// Avisos al dueño para que actúe manualmente (reenvío de plantilla, recordatorios,
+// alertas). Si hay grupo de envío manual configurado, van al grupo; si no, a los
+// teléfonos personales (comportamiento anterior).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function sendToOwners(h: any, ownerPhone: string, text: string) {
-  for (const phone of getOwnerNotifyPhones(ownerPhone)) {
+  const manualGroup = getManualGroupJid(ownerPhone);
+  const targets = manualGroup
+    ? [manualGroup]
+    : getOwnerNotifyPhones(ownerPhone).map((p) => `${p}@s.whatsapp.net`);
+  for (const jid of targets) {
     try {
-      const r = await h.sock.sendMessage(`${phone}@s.whatsapp.net`, { text });
+      const r = await h.sock.sendMessage(jid, { text });
       if (r?.key?.id) registerBotMessage(r.key.id);
     } catch (e) {
       console.error("[bot] Error avisando al dueño:", e);

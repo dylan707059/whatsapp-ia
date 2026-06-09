@@ -33,7 +33,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     blockedDepartments:       saved?.blocked_departments       ?? "",
     blockedCities:            saved?.blocked_cities            ?? "",
     blockedDepartmentCodes:   saved?.blocked_department_codes  ?? "",
-    ownerNotifyPhones:        saved?.owner_notify_phones       ?? ""
+    ownerNotifyPhones:        saved?.owner_notify_phones       ?? "",
+    confirmGroupJid:          saved?.confirm_group_jid         ?? "",
+    manualGroupJid:           saved?.manual_group_jid          ?? ""
   };
 
   return NextResponse.json({ configured: Boolean(saved?.configured), settings });
@@ -65,7 +67,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     blockedDepartments:      str(body.blockedDepartments) || null,
     blockedCities:           str(body.blockedCities) || null,
     blockedDepartmentCodes:  str(body.blockedDepartmentCodes) || null,
-    ownerNotifyPhones:       str(body.ownerNotifyPhones) || null
+    ownerNotifyPhones:       str(body.ownerNotifyPhones) || null,
+    confirmGroupJid:         str(body.confirmGroupJid) || null,
+    manualGroupJid:          str(body.manualGroupJid) || null
   });
 
   return NextResponse.json({ ok: true });

@@ -1,6 +1,6 @@
 import type { WASocket } from "@whiskeysockets/baileys";
 import type { OrderData } from "./types";
-import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getAccountByOwnerPhone, getAccountSettings } from "./db";
+import { setOwnerNotifiedAt, getOrCreateConversation, insertMessage, getAccountByOwnerPhone, getAccountSettings, getConfirmGroupJid } from "./db";
 import { getActiveOrder, setOrderOwnerNotifiedAt } from "./orders";
 import { registerBotMessage } from "./bot-messages";
 import { insertOrderEvent } from "./order-events";
@@ -74,12 +74,18 @@ export async function sendOwnerNotificationSequentially(
     return;
   }
 
-  // El número conectado de la cuenta dueña (para resolver SUS teléfonos de aviso).
+  // El número conectado de la cuenta dueña (para resolver SUS destinos de aviso).
   const botOwnerPhone = (sock.user?.id ?? "").split(":")[0] ?? "";
-  const phones = getOwnerNotifyPhones(botOwnerPhone);
 
-  if (phones.length === 0) {
-    console.warn("[bot] Sin teléfonos de aviso configurados — no se envía notificación interna");
+  // Destino: si hay grupo de confirmaciones (Dropi) configurado, va al grupo;
+  // si no, a los teléfonos personales de aviso (comportamiento anterior).
+  const confirmGroup = getConfirmGroupJid(botOwnerPhone);
+  const targets: { jid: string; label: string }[] = confirmGroup
+    ? [{ jid: confirmGroup, label: "Grupo confirmaciones" }]
+    : getOwnerNotifyPhones(botOwnerPhone).map((p) => ({ jid: `${p}@s.whatsapp.net`, label: `Owner +${p}` }));
+
+  if (targets.length === 0) {
+    console.warn("[bot] Sin grupo ni teléfonos de aviso configurados — no se envía notificación interna");
     return;
   }
 
@@ -91,35 +97,33 @@ export async function sendOwnerNotificationSequentially(
     conversationId: data.conversationId,
     eventType: "OWNER_NOTIFICATION_STARTED",
     message: "Iniciando notificación a owners",
-    metadata: { phones, phone: data.phone }
+    metadata: { targets: targets.map((t) => t.jid), phone: data.phone }
   });
 
   const summary = buildSummaryMessage(data, orderId);
 
-  for (const phone of phones) {
-    const jid = `${phone}@s.whatsapp.net`;
-
+  for (const { jid, label } of targets) {
     try {
       const r1 = await sock.sendMessage(jid, { text: summary });
       if (r1?.key?.id) registerBotMessage(r1.key.id);
       await sleep(800);
 
-      // Guardar la notificación en la conversación del owner en el dashboard.
+      // Guardar la notificación en la conversación del destino en el dashboard.
       try {
-        const ownerConv = getOrCreateConversation(jid, `Owner +${phone}`, botOwnerPhone);
+        const ownerConv = getOrCreateConversation(jid, label, botOwnerPhone);
         insertMessage(ownerConv.id, "assistant", summary);
       } catch (err) {
-        console.warn(`[bot] No se pudo guardar notif en conv del owner ${phone}:`, err);
+        console.warn(`[bot] No se pudo guardar notif en conv de ${label}:`, err);
       }
 
-      console.log(`[bot] Notificación del pedido ${orderId ?? data.conversationId} enviada a ${phone}`);
+      console.log(`[bot] Notificación del pedido ${orderId ?? data.conversationId} enviada a ${label} (${jid})`);
     } catch (err) {
-      console.error(`[bot] Error enviando pedido ${orderId ?? data.conversationId} a ${phone}:`, err);
+      console.error(`[bot] Error enviando pedido ${orderId ?? data.conversationId} a ${label}:`, err);
       insertOrderEvent({
         orderId,
         conversationId: data.conversationId,
         eventType: "OWNER_NOTIFICATION_ERROR",
-        message: `Error notificando a ${phone}`,
+        message: `Error notificando a ${label}`,
         metadata: { error: String(err) }
       });
     }
@@ -133,7 +137,7 @@ export async function sendOwnerNotificationSequentially(
     conversationId: data.conversationId,
     eventType: "OWNER_NOTIFIED",
     message: "Owners notificados correctamente",
-    metadata: { phones, phone: data.phone }
+    metadata: { targets: targets.map((t) => t.jid), phone: data.phone }
   });
   console.log(`[bot] Pedido ${orderId ?? data.conversationId} notificado correctamente`);
 }

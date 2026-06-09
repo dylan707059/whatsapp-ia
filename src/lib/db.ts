@@ -318,6 +318,8 @@ db.exec(`
     blocked_cities             TEXT,
     blocked_department_codes   TEXT,
     owner_notify_phones        TEXT,
+    confirm_group_jid          TEXT,
+    manual_group_jid           TEXT,
     configured                 INTEGER NOT NULL DEFAULT 0,
     updated_at                 INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -385,6 +387,12 @@ db.exec(`
   if (!cols.includes("media_path"))     db.exec("ALTER TABLE outbox ADD COLUMN media_path TEXT");
   if (!cols.includes("media_mime"))     db.exec("ALTER TABLE outbox ADD COLUMN media_mime TEXT");
   if (!cols.includes("media_filename")) db.exec("ALTER TABLE outbox ADD COLUMN media_filename TEXT");
+}
+{
+  const cols = (db.prepare("PRAGMA table_info(account_settings)").all() as { name: string }[])
+    .map(c => c.name);
+  if (!cols.includes("confirm_group_jid")) db.exec("ALTER TABLE account_settings ADD COLUMN confirm_group_jid TEXT");
+  if (!cols.includes("manual_group_jid"))  db.exec("ALTER TABLE account_settings ADD COLUMN manual_group_jid TEXT");
 }
 {
   const cols = (db.prepare("PRAGMA table_info(messages)").all() as { name: string }[])
@@ -1344,6 +1352,8 @@ export interface AccountSettings {
   blocked_cities: string | null;
   blocked_department_codes: string | null;
   owner_notify_phones: string | null;
+  confirm_group_jid: string | null;
+  manual_group_jid: string | null;
   configured: number;
   updated_at: number;
 }
@@ -1358,8 +1368,9 @@ const stmtUpsertSettings = db.prepare(`
   INSERT INTO account_settings (
     account_id, shopify_domain, shopify_webhook_secret, confirmation_delay_seconds,
     blocked_departments, blocked_cities, blocked_department_codes, owner_notify_phones,
+    confirm_group_jid, manual_group_jid,
     configured, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch())
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch())
   ON CONFLICT(account_id) DO UPDATE SET
     shopify_domain             = excluded.shopify_domain,
     shopify_webhook_secret     = excluded.shopify_webhook_secret,
@@ -1368,6 +1379,8 @@ const stmtUpsertSettings = db.prepare(`
     blocked_cities             = excluded.blocked_cities,
     blocked_department_codes   = excluded.blocked_department_codes,
     owner_notify_phones        = excluded.owner_notify_phones,
+    confirm_group_jid          = excluded.confirm_group_jid,
+    manual_group_jid           = excluded.manual_group_jid,
     configured                 = 1,
     updated_at                 = unixepoch()
 `);
@@ -1384,6 +1397,8 @@ export interface AccountSettingsInput {
   blockedCities: string | null;
   blockedDepartmentCodes: string | null;
   ownerNotifyPhones: string | null;
+  confirmGroupJid: string | null;
+  manualGroupJid: string | null;
 }
 
 export function upsertAccountSettings(accountId: number, data: AccountSettingsInput): void {
@@ -1395,8 +1410,26 @@ export function upsertAccountSettings(accountId: number, data: AccountSettingsIn
     data.blockedDepartments,
     data.blockedCities,
     data.blockedDepartmentCodes,
-    data.ownerNotifyPhones
+    data.ownerNotifyPhones,
+    data.confirmGroupJid,
+    data.manualGroupJid
   );
+}
+
+/** JID del grupo de confirmaciones (Dropi) de la cuenta, o "" si no hay. */
+export function getConfirmGroupJid(ownerPhone: string): string {
+  if (!ownerPhone) return "";
+  const acc = getAccountByOwnerPhone(ownerPhone);
+  if (!acc) return "";
+  return getAccountSettings(acc.id)?.confirm_group_jid?.trim() ?? "";
+}
+
+/** JID del grupo de envío manual al cliente de la cuenta, o "" si no hay. */
+export function getManualGroupJid(ownerPhone: string): string {
+  if (!ownerPhone) return "";
+  const acc = getAccountByOwnerPhone(ownerPhone);
+  if (!acc) return "";
+  return getAccountSettings(acc.id)?.manual_group_jid?.trim() ?? "";
 }
 
 /**

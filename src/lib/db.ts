@@ -550,6 +550,15 @@ export function getRecentHistory(conversationId: number, limit = 20): Message[] 
   return stmtGetHistory.all(conversationId, limit);
 }
 
+// True si el cliente (role='user') ya envió al menos un mensaje en esta conversación.
+// Se usa para decidir si el template de confirmación Shopify va al cliente o a los dueños.
+const stmtHasClientMsg = db.prepare<[number], { n: number }>(
+  "SELECT COUNT(*) as n FROM messages WHERE conversation_id = ? AND role = 'user' LIMIT 1"
+);
+export function hasClientMessage(conversationId: number): boolean {
+  return (stmtHasClientMsg.get(conversationId)?.n ?? 0) > 0;
+}
+
 // Estado de conexión
 const stmtGetConn = db.prepare<[], ConnectionState>(
   "SELECT * FROM connection_state WHERE id = 1"

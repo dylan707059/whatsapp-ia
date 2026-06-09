@@ -8,12 +8,14 @@ import {
   isAccountAutomationPaused, getAppState, setAppState, getAccountById,
   findRecentLidConversationByName, mergeConversationInto,
   getPendingWaLabelOps, markWaLabelOpDone,
-  listOrphanLidConversations, findRecentShopifyConversationByName
+  listOrphanLidConversations, findRecentShopifyConversationByName,
+  hasClientMessage
 } from "./db";
 import { registerContact } from "./baileys/contact-store";
 import {
   getOrdersNeedingReminder,
   getOrdersToAutoCancel,
+  getActiveOrder,
   incrementReminderCount,
   setOrderStatus,
   touchOrderReminder,
@@ -79,16 +81,61 @@ function ensureAccountsConnected() {
   }
 }
 
-function buildReminderText(attemptNumber: number, customerFirstName: string | null, orderNumber: string): string {
-  const greeting = customerFirstName ? `Hola ${customerFirstName} 😊` : "Hola 😊";
-  const urgency = attemptNumber === 1
-    ? "Te recordamos que tu pedido aún está pendiente de confirmar."
-    : "Es nuestro último recordatorio antes de cancelar tu pedido por falta de respuesta.";
+// Reconstruye el template de confirmación desde los datos del pedido guardados en DB,
+// listo para que el dueño lo copie y reenvíe manualmente al cliente.
+function buildForwardTemplate(order: OrderWithConv): string {
+  const firstName = order.first_name || order.conv_name?.split(" ")[0] || "amig@";
+  const orderNum  = order.id ? `#${order.id}` : "";
+
+  const colorLine = order.color && order.color !== "—" ? `\n🎨 Color: ${order.color}` : "";
+  const sizeLine  = order.size  && order.size  !== "—" ? `\n📏 Talla: ${order.size}`  : "";
+  const qtyNum    = Number(order.quantity ?? 1);
+  const qtyLine   = order.quantity ? `\n🔢 Cantidad: ${order.quantity} unidad${qtyNum === 1 ? "" : "es"}` : "";
+
   return [
-    greeting, "", urgency, "",
-    `🧾 Pedido: ${orderNumber}`, "",
+    `Hola ${firstName}, buen día 😊`,
+    "",
+    "Te escribimos para confirmar los datos de tu pedido antes de enviarlo. Por favor revisa que todo esté correcto:",
+    "",
+    `🧾 Pedido: ${orderNum}`,
+    "",
+    `🛍️ Producto: ${order.product || ""}${colorLine}${sizeLine}${qtyLine}`,
+    "",
+    `🚚 Envío: ${order.shipping || "Gratis"}`,
+    `💵 Total a pagar: ${order.total || ""}`,
+    `💳 Pago: ${order.payment || "Contraentrega"}`,
+    "",
+    `👤 Nombre: ${order.first_name || ""}`,
+    `👤 Apellido: ${order.last_name || ""}`,
+    `📱 Teléfono: ${order.phone || ""}`,
+    `📍 Dirección: ${order.address || ""}`,
+    `🏙️ Ciudad: ${order.city || ""}`,
+    `📌 Departamento: ${order.department || ""}`,
+    "",
     "Si todo está correcto responde *CONFIRMADO* para despachar tu pedido. Si deseas cambiar algo, escríbenos y te ayudamos de inmediato 💛"
   ].join("\n");
+}
+
+// Mensaje que va al DUEÑO cuando el cliente no ha respondido la confirmación.
+// Incluye el template completo del pedido para que el dueño lo reenvíe manualmente.
+function buildOwnerReminderMessage(order: OrderWithConv, attemptNumber: number, maxAttempts: number): string {
+  const name     = order.first_name || order.conv_name || "el cliente";
+  const phone    = order.phone || order.conv_phone.split("@")[0];
+  const orderNum = order.id ? `#${order.id}` : "";
+  const template = buildForwardTemplate(order);
+
+  const lines = [
+    `⚠️ *${name}* no ha respondido la confirmación del pedido ${orderNum}`,
+    `📱 ${phone}`,
+    ""
+  ];
+
+  if (attemptNumber >= maxAttempts) {
+    lines.push("⚠️ *Último aviso — si no confirma, el pedido se cancelará automáticamente.*", "");
+  }
+
+  lines.push("Reenvíale este mensaje al cliente:", "─────────────────────", template, "─────────────────────");
+  return lines.join("\n");
 }
 
 function buildAutoCancelText(customerFirstName: string | null, orderNumber: string): string {
@@ -200,6 +247,31 @@ export function startBotRuntime(): void {
           console.log(`[bot] Outbox #${item.id} descartado por antiguo (${Math.round((nowSec - item.created_at) / 3600)}h)`);
           continue;
         }
+        // ─── Confirmación Shopify: si el cliente NUNCA escribió → redirigir a dueños ──
+        // El outbox programado por el webhook se dispara por timeout (cliente no inició
+        // el chat). En ese caso no mandamos nada al cliente: le enviamos el template a
+        // los dueños para que ellos lo reenvíen manualmente.
+        // Si el cliente SÍ escribió (advancePendingOutbox lo adelantó), hay mensajes
+        // role='user' en la conv y procedemos normal (se envía al cliente).
+        if (item.notify_owner && !hasClientMessage(item.conversation_id)) {
+          claimOutboxItem(item.id);
+          const order = getActiveOrder(item.conversation_id);
+          const conv  = getConversationById(item.conversation_id);
+          if (order && conv) {
+            const owWithConv: OrderWithConv = {
+              ...order,
+              conv_name: conv.name,
+              conv_phone: conv.phone
+            };
+            const ownerMsg = buildOwnerReminderMessage(owWithConv, 1, REMINDER_MAX);
+            try { await sendToOwners(h, conn.phone, ownerMsg); } catch {}
+            console.log(`[bot] Outbox #${item.id}: cliente nunca escribió → template enviado a dueños para reenvío manual`);
+          } else {
+            console.log(`[bot] Outbox #${item.id}: cliente nunca escribió, sin order/conv → descartado`);
+          }
+          continue;
+        }
+
         if (!claimOutboxItem(item.id)) continue;
         try {
           let content: AnyMessageContent;
@@ -321,27 +393,27 @@ export function startBotRuntime(): void {
         continue; // en recuperación no enviamos recordatorios ni cancelaciones
       }
 
-      // Operación normal: enviar de a pocos (cap) para no ser cansón.
+      // Operación normal: avisar al dueño (de a pocos) para que reenvíe manualmente.
+      // NO se manda directamente al cliente — el dueño recibe el template listo para copiar.
       let sentCount = 0;
       for (const order of due) {
         if (sentCount >= REMINDER_BATCH) break;
         try {
           const attemptNumber = order.reminder_count + 1;
-          const orderNumberText = order.id ? `#${order.id}` : "";
-          const text = buildReminderText(attemptNumber, order.first_name, orderNumberText);
-          const reminderMsgId = insertMessage(order.conversation_id, "assistant", text);
-          enqueueOutbox(order.conversation_id, order.conv_phone, text, 0, reminderMsgId);
+          const ownerMsg = buildOwnerReminderMessage(order, attemptNumber, REMINDER_MAX);
+          await sendToOwners(h, currentOwner, ownerMsg);
           incrementReminderCount(order.id);
           sentCount++;
           insertOrderEvent({
             orderId: order.id,
             conversationId: order.conversation_id,
             eventType: "CONFIRMATION_RESENT_TO_CLIENT",
-            message: `Recordatorio ${attemptNumber}/${REMINDER_MAX} enviado`,
+            message: `Aviso ${attemptNumber}/${REMINDER_MAX} enviado al dueño para reenvío manual`,
             metadata: { attemptNumber, maxAttempts: REMINDER_MAX }
           });
+          console.log(`[bot] Aviso al dueño por pedido #${order.id} (intento ${attemptNumber}/${REMINDER_MAX})`);
         } catch (err) {
-          console.error(`[bot] Error enviando recordatorio order #${order.id}:`, err);
+          console.error(`[bot] Error enviando aviso al dueño por order #${order.id}:`, err);
         }
       }
 

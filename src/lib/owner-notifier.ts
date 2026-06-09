@@ -37,11 +37,16 @@ export function getOwnerNotifyPhones(ownerPhone: string): string[] {
 
 function buildSummaryMessage(data: OrderData, orderId?: number): string {
   const id = orderId ?? data.conversationId;
+  const nombre = data.fullName || "el cliente";
+  const phoneDigits = (data.phone || "").replace(/\D/g, "");
+  const phoneDisplay = phoneDigits.startsWith("57") && phoneDigits.length === 12
+    ? `+57 ${phoneDigits.slice(2, 5)} ${phoneDigits.slice(5, 8)} ${phoneDigits.slice(8)}`
+    : data.phone;
   return [
-    `✅ *PEDIDO #${id} CONFIRMADO*`,
+    `✅ *La señora ${nombre} confirmó su pedido* ✅`,
+    `📱 ${phoneDisplay}`,
     "",
-    `👤 *${data.fullName}*`,
-    `📱 ${data.phone}`,
+    `🧾 Pedido *#${id}*`,
     "",
     `📦 ${data.product}`,
     `🎨 ${data.color}  •  📏 ${data.size}  •  🔢 x${data.quantity}`,

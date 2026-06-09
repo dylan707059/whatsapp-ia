@@ -50,6 +50,17 @@ const CONFIRMATION_PATTERNS: RegExp[] = [
   /\b(si\s+)?(lo|la)\s+quiero\b/
 ];
 
+// Mensaje de PRESENTACIÓN inicial del cliente, auto-generado por la tienda
+// cuando pide por WhatsApp. Ej: "Hola soy X, acabo de hacer un pedido y quiero
+// confirmar mis datos: ... Quedo pendiente, gracias."
+// NO es una confirmación: el cliente solo se presenta. Debe leer la plantilla
+// del bot y responder "CONFIRMADO" después. Si matchea → la fuerza es "none".
+const INTRO_MESSAGE_PATTERNS: RegExp[] = [
+  /\bconfirmar\s+mis?\s+datos\b/,           // "quiero confirmar mis datos"
+  /\bacabo\s+de\s+(hacer|realizar)\b/,      // "acabo de hacer un pedido"
+  /\bquedo\s+pendiente\b/                   // "quedo pendiente, gracias"
+];
+
 // Frases que indican EXPLICITAMENTE que algo NO está bien.
 // Si matchean, NO se trata como confirmación aunque también haya keyword positivo.
 const NEGATIVE_PATTERNS: RegExp[] = [
@@ -138,6 +149,11 @@ function looksLikeConfirmWord(word: string): boolean {
 export function confirmationStrength(text: string): "strong" | "weak" | "none" {
   const norm = normalize(text);
   if (!norm) return "none";
+
+  // Mensaje de presentación inicial del cliente → no es confirmación
+  for (const intro of INTRO_MESSAGE_PATTERNS) {
+    if (intro.test(norm)) return "none";
+  }
 
   // Intención negativa explícita → nunca confirma
   for (const neg of NEGATIVE_PATTERNS) {
